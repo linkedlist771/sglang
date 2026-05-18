@@ -898,6 +898,39 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             self.init_cublas()
             self.init_attention_backend()
             self.kernel_warmup()
+            # Init hisparse coordinator (must happen before CUDA graph capture).
+            # Only the target runner owns scheduler-populated staging state.
+            if self.enable_hisparse and not self.is_draft_worker:
+                from sglang.srt.managers.hisparse_coordinator import HiSparseCoordinator
+                from sglang.srt.mem_cache.sparsity import parse_hisparse_config
+
+                hisparse_cfg = parse_hisparse_config(self.server_args)
+                hisparse_top_k = getattr(
+                    self.model_config.hf_text_config, "index_topk", hisparse_cfg.top_k
+                )
+                hisparse_host_allocator_type = (
+                    "mooncake"
+                    if (
+                        self.server_args.disaggregation_mode == "decode"
+                        and self.server_args.disaggregation_transfer_backend
+                        == "mooncake"
+                    )
+                    else "default"
+                )
+                self.hisparse_coordinator = HiSparseCoordinator(
+                    req_to_token_pool=self.req_to_token_pool,
+                    token_to_kv_pool_allocator=self.token_to_kv_pool_allocator,
+                    top_k=hisparse_top_k,
+                    device_buffer_size=hisparse_cfg.device_buffer_size,
+                    device=self.device,
+                    tp_group=(
+                        self.attention_tp_group.cpu_group
+                        if self.server_args.enable_dp_attention
+                        else self.tp_group.cpu_group
+                    ),
+                    host_to_device_ratio=hisparse_cfg.host_to_device_ratio,
+                    host_allocator_type=hisparse_host_allocator_type,
+                )
             self._pre_initialize_flashinfer_allreduce_workspace()
             if not disable_cuda_graph:
                 self.init_decode_cuda_graph()
