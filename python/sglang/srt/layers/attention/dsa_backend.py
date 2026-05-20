@@ -95,6 +95,11 @@ def _to_2d_context_lens(seqlens_32: torch.Tensor, batch_size: int) -> torch.Tens
     return seqlens_32.contiguous().view(-1, 1)
 
 
+def _uses_hisparse_device_mapping(token_to_kv_pool) -> bool:
+    translate_loc = getattr(token_to_kv_pool, "translate_loc_to_hisparse_device", None)
+    return callable(translate_loc)
+
+
 # Reuse this workspace buffer across all DSA backend instances
 global_workspace_buffer = None
 
@@ -1454,6 +1459,14 @@ class DeepseekSparseAttnBackend(
         topk_transform_method = self.get_topk_transform_method(
             forward_batch.forward_mode
         )
+        hisparse_coordinator = (
+            getattr(forward_batch, "hisparse_coordinator", None)
+            or self.hisparse_coordinator
+        )
+        use_device_mapping_without_coordinator = (
+            hisparse_coordinator is None
+            and _uses_hisparse_device_mapping(self.token_to_kv_pool)
+        )
         if envs.SGLANG_DSA_FUSE_TOPK.get():
             page_table_1 = self._get_fused_topk_page_table(topk_indices)
         else:
@@ -1478,7 +1491,7 @@ class DeepseekSparseAttnBackend(
                     page_size=1,
                 )
 
-        if self.hisparse_coordinator is not None:
+        if hisparse_coordinator is not None:
             if forward_batch.forward_mode.is_target_verify():
                 num_reqs = forward_batch.req_pool_indices.shape[0]
                 num_steps = self.speculative_num_draft_tokens
@@ -1493,7 +1506,7 @@ class DeepseekSparseAttnBackend(
                     f"({num_reqs * num_steps}, {self.dsa_index_topk}), "
                     f"forward_mode={forward_batch.forward_mode}, num_reqs={num_reqs}, num_steps={num_steps}"
                 )
-                page_table_1 = self.hisparse_coordinator.swap_in_selected_pages(
+                page_table_1 = hisparse_coordinator.swap_in_selected_pages(
                     forward_batch.req_pool_indices,
                     metadata.dsa_seqlens_expanded,
                     topk_indices.view(num_reqs, num_steps, -1),
@@ -1501,11 +1514,26 @@ class DeepseekSparseAttnBackend(
                     token_position_space="full",
                     num_steps=num_steps,
                 ).view(num_reqs * num_steps, -1)
+            elif forward_batch.forward_mode.is_draft_extend(include_v2=True):
+                assert (
+                    topk_indices is not None
+                ), "topk_indices is None in DRAFT_EXTEND/DRAFT_EXTEND_V2"
+                page_table_1 = self._swap_in_hisparse_draft_extend_pages(
+                    forward_batch,
+                    metadata,
+                    topk_indices,
+                    layer.layer_id,
+                    hisparse_coordinator,
+                )
             else:
                 # flash_mla_sparse_fwd / tilelang require int32 page indices.
                 page_table_1 = self.token_to_kv_pool.translate_loc_to_hisparse_device(
                     page_table_1
                 ).to(torch.int32)
+        elif use_device_mapping_without_coordinator:
+            page_table_1 = self.token_to_kv_pool.translate_loc_to_hisparse_device(
+                page_table_1
+            ).to(torch.int32)
 
         if dsa_impl == "tilelang":
             if q_rope is not None:
@@ -1658,8 +1686,16 @@ class DeepseekSparseAttnBackend(
         if topk_indices is not None:
             topk_indices = self._pad_topk_indices(topk_indices, q_nope.shape[0])
 
-        if self.hisparse_coordinator is not None:
-            page_table_1 = self.hisparse_coordinator.swap_in_selected_pages(
+        hisparse_coordinator = (
+            getattr(forward_batch, "hisparse_coordinator", None)
+            or self.hisparse_coordinator
+        )
+        use_device_mapping_without_coordinator = (
+            hisparse_coordinator is None
+            and _uses_hisparse_device_mapping(self.token_to_kv_pool)
+        )
+        if hisparse_coordinator is not None:
+            page_table_1 = hisparse_coordinator.swap_in_selected_pages(
                 forward_batch.req_pool_indices,
                 forward_batch.seq_lens,
                 topk_indices,
@@ -1674,6 +1710,11 @@ class DeepseekSparseAttnBackend(
                 topk_indices=topk_indices,
                 page_size=1,
             )
+
+        if use_device_mapping_without_coordinator:
+            page_table_1 = self.token_to_kv_pool.translate_loc_to_hisparse_device(
+                page_table_1
+            ).to(torch.int32)
 
         if self.dsa_decode_impl == "flashmla_sparse":
             if q_rope is not None:
@@ -2223,6 +2264,78 @@ class DeepseekSparseAttnBackend(
 
         return out
 
+    def _swap_in_hisparse_draft_extend_pages(
+        self,
+        forward_batch: ForwardBatch,
+        metadata: DSAMetadata,
+        topk_indices: torch.Tensor,
+        layer_id: int,
+        hisparse_coordinator,
+    ) -> torch.Tensor:
+        """Swap HiSparse pages for variable-length DRAFT_EXTEND queries."""
+        extend_lens_cpu = forward_batch.extend_seq_lens_cpu
+        if extend_lens_cpu is None:
+            extend_lens_cpu = metadata.dsa_extend_seq_lens_list
+        extend_lens_cpu = [int(x) for x in extend_lens_cpu]
+
+        num_reqs = forward_batch.req_pool_indices.shape[0]
+        extend_lens_cpu = extend_lens_cpu[:num_reqs]
+        total_extend = sum(extend_lens_cpu)
+        if total_extend == 0:
+            return topk_indices.new_full(topk_indices.shape, -1)
+
+        max_steps = max(extend_lens_cpu)
+        if max_steps == 0:
+            return topk_indices.new_full(topk_indices.shape, -1)
+
+        real_topk = topk_indices[:total_extend]
+        padded_topk = topk_indices.new_full(
+            (num_reqs, max_steps, topk_indices.shape[-1]), -1
+        )
+        padded_seq_lens = metadata.dsa_seqlens_expanded.new_ones((num_reqs, max_steps))
+
+        offset = 0
+        for req_idx, extend_len in enumerate(extend_lens_cpu):
+            if extend_len == 0:
+                continue
+            next_offset = offset + extend_len
+            padded_topk[req_idx, :extend_len].copy_(real_topk[offset:next_offset])
+            padded_seq_lens[req_idx, :extend_len].copy_(
+                metadata.dsa_seqlens_expanded[offset:next_offset]
+            )
+            offset = next_offset
+
+        swapped = hisparse_coordinator.swap_in_selected_pages(
+            forward_batch.req_pool_indices,
+            padded_seq_lens.reshape(-1),
+            padded_topk,
+            layer_id,
+            token_position_space="full",
+            num_steps=max_steps,
+        )
+
+        rows = [
+            swapped[req_idx, :extend_len]
+            for req_idx, extend_len in enumerate(extend_lens_cpu)
+            if extend_len > 0
+        ]
+        page_table_1 = torch.cat(rows, dim=0)
+        if topk_indices.shape[0] > total_extend:
+            page_table_1 = torch.cat(
+                [
+                    page_table_1,
+                    topk_indices.new_full(
+                        (
+                            topk_indices.shape[0] - total_extend,
+                            topk_indices.shape[-1],
+                        ),
+                        -1,
+                    ),
+                ],
+                dim=0,
+            )
+        return page_table_1
+
     def _pad_topk_indices(
         self, topk_indices: torch.Tensor, num_tokens: int
     ) -> torch.Tensor:
@@ -2326,9 +2439,13 @@ class DeepseekSparseAttnBackend(
     def get_indexer_metadata(
         self, layer_id: int, forward_batch: ForwardBatch
     ) -> DSAIndexerMetadata:
-        force_unfused = self.hisparse_coordinator is not None and (
+        force_unfused = (
+            (self.hisparse_coordinator is not None)
+            or (getattr(forward_batch, "hisparse_coordinator", None) is not None)
+        ) and (
             forward_batch.forward_mode.is_decode_or_idle()
             or forward_batch.forward_mode.is_target_verify()
+            or forward_batch.forward_mode.is_draft_extend(include_v2=True)
         )
         return DSAIndexerMetadata(
             attn_metadata=self.forward_metadata,

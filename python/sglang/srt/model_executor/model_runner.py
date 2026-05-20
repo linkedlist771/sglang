@@ -3630,6 +3630,20 @@ class ModelRunner(ModelRunnerKVCacheMixin):
         else:
             ctx_mgr = forward_context(ForwardContext(attn_backend=self.attn_backend))
         with ctx_mgr:
+            active_hisparse_coordinator = self.hisparse_coordinator
+            if (
+                active_hisparse_coordinator is None
+                and forward_batch.hisparse_coordinator is not None
+                and callable(
+                    getattr(
+                        self.token_to_kv_pool,
+                        "translate_loc_to_hisparse_device",
+                        None,
+                    )
+                )
+            ):
+                active_hisparse_coordinator = forward_batch.hisparse_coordinator
+
             mode_check = (
                 forward_batch.forward_mode.is_cpu_graph
                 if self.device == "cpu"
@@ -3643,11 +3657,13 @@ class ModelRunner(ModelRunnerKVCacheMixin):
 
             if (
                 forward_batch.forward_mode.is_decode()
-                and self.hisparse_coordinator is not None
+                and active_hisparse_coordinator is not None
             ):
-                forward_batch.hisparse_coordinator = self.hisparse_coordinator
-                self.hisparse_coordinator.wait_for_pending_backup()
-                self.hisparse_coordinator.num_real_reqs.fill_(forward_batch.batch_size)
+                forward_batch.hisparse_coordinator = active_hisparse_coordinator
+                active_hisparse_coordinator.wait_for_pending_backup()
+                active_hisparse_coordinator.num_real_reqs.fill_(
+                    forward_batch.batch_size
+                )
 
             # Replay cuda graph if applicable
             if can_run_graph:
@@ -3681,8 +3697,11 @@ class ModelRunner(ModelRunnerKVCacheMixin):
                 )
 
             # Hisparse coordinator — backends now read it from self.model_runner.
-            if self.hisparse_coordinator is not None:
-                self.hisparse_coordinator.num_real_reqs.fill_(forward_batch.batch_size)
+            forward_batch.hisparse_coordinator = active_hisparse_coordinator
+            if active_hisparse_coordinator is not None:
+                active_hisparse_coordinator.num_real_reqs.fill_(
+                    forward_batch.batch_size
+                )
 
             # Forward without cuda graph
             if forward_batch.forward_mode.is_decode():

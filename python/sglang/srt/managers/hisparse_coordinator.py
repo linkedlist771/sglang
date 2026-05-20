@@ -186,6 +186,7 @@ class HiSparseCoordinator:
         # CPU flag: True means "skip backup on the next decode step" because
         # staging already backed up all prefill tokens.  Cleared after one step.
         self._skip_first_backup = [False] * max_num_req_slots
+        self._pending_draft_extend_backup = None
 
     def set_decode_producer_stream(self, stream) -> None:
         self.decode_producer_stream = stream
@@ -479,6 +480,9 @@ class HiSparseCoordinator:
             self.req_device_buffer_token_locs[
                 :, req_pool_indices, self.device_buffer_size
             ] = reserved_buffer_loc.to(torch.int32)
+            self.req_device_buffer_tokens[
+                :, req_pool_indices, self.device_buffer_size
+            ] = (seq_lens.to(torch.int32) - 1)
 
             # No need to clear prior mappings: the only consumer of the mapping
             # for past tokens is the swap-in kernel, and it goes through
@@ -612,6 +616,57 @@ class HiSparseCoordinator:
             return
         self._backup_done_event.wait(device_module.current_stream())
         self._has_pending_backup = False
+
+    def _backup_device_locs_to_host(
+        self, host_locs: torch.Tensor, device_locs: torch.Tensor
+    ) -> None:
+        if host_locs.numel() == 0:
+            return
+        self.wait_for_pending_backup()
+        schedule_stream = device_module.current_stream()
+        device_locs = device_locs.contiguous()
+        with device_module.stream(self.decode_backup_stream):
+            self.decode_backup_stream.wait_stream(schedule_stream)
+            if self.decode_producer_stream is not None:
+                self.decode_backup_stream.wait_stream(self.decode_producer_stream)
+            self.mem_pool_host.backup_from_device_all_layer(
+                self.mem_pool_device,
+                host_locs,
+                device_locs,
+                io_backend="kernel",
+            )
+            if host_locs.is_cuda:
+                host_locs.record_stream(self.decode_backup_stream)
+            if device_locs.is_cuda:
+                device_locs.record_stream(self.decode_backup_stream)
+        event = device_module.Event()
+        event.record(self.decode_backup_stream)
+        device_module.current_stream().wait_event(event)
+
+    def finish_pending_draft_extend_backup(self) -> None:
+        pending = self._pending_draft_extend_backup
+        if pending is None:
+            return
+        self._pending_draft_extend_backup = None
+        host_locs, device_locs, logical_locs_to_clear = pending
+        self._backup_device_locs_to_host(host_locs, device_locs)
+        if logical_locs_to_clear.numel() > 0:
+            full_to_device_mapping = (
+                self.token_to_kv_pool_allocator.full_to_hisparse_device_index_mapping
+            )
+            full_to_device_mapping[logical_locs_to_clear] = 0
+
+    def clear_pending_draft_extend_backup(self) -> None:
+        pending = self._pending_draft_extend_backup
+        if pending is None:
+            return
+        self._pending_draft_extend_backup = None
+        _, _, logical_locs_to_clear = pending
+        if logical_locs_to_clear.numel() > 0:
+            full_to_device_mapping = (
+                self.token_to_kv_pool_allocator.full_to_hisparse_device_index_mapping
+            )
+            full_to_device_mapping[logical_locs_to_clear] = 0
 
     def supports_hisparse_draft_slots(self) -> bool:
         return not self.is_dsv4_hisparse
@@ -854,6 +909,7 @@ class HiSparseCoordinator:
         assert self.supports_hisparse_draft_slots()
         if accepted_cache_locs.numel() == 0:
             return
+        self.clear_pending_draft_extend_backup()
 
         counts = num_correct_drafts.to(torch.int64) + 1
         counts_cpu = num_correct_drafts_cpu.to(torch.int64) + 1
@@ -908,43 +964,27 @@ class HiSparseCoordinator:
                 return
             host_locs = host_locs.to(device=self.device)
 
-            self.wait_for_pending_backup()
-            schedule_stream = device_module.current_stream()
-            device_locs_for_backup = backup_device_locs.contiguous()
-            with device_module.stream(self.decode_backup_stream):
-                self.decode_backup_stream.wait_stream(schedule_stream)
-                self.mem_pool_host.backup_from_device_all_layer(
-                    self.mem_pool_device,
-                    host_locs,
-                    device_locs_for_backup,
-                    io_backend="kernel",
-                )
-                if host_locs.is_cuda:
-                    host_locs.record_stream(self.decode_backup_stream)
-                if device_locs_for_backup.is_cuda:
-                    device_locs_for_backup.record_stream(self.decode_backup_stream)
-            event = device_module.Event()
-            event.record(self.decode_backup_stream)
-            device_module.current_stream().wait_event(event)
-
+            self._backup_device_locs_to_host(host_locs, backup_device_locs)
             self.req_to_host_pool[backup_req_indices, backup_positions] = host_locs
+            full_to_device_mapping[accepted_cache_locs[needs_backup]] = (
+                backup_device_locs
+            )
 
         offsets = torch.cat(
             [torch.zeros(1, dtype=torch.int64, device=counts.device), counts.cumsum(0)]
         )
         last_offsets = offsets[1:] - 1
         last_positions = accepted_token_positions[last_offsets]
-        newest_slots = self.req_to_device_buffer[
-            req_pool_indices, self.device_buffer_size
-        ]
+        reserved_positions = last_positions.clamp(max=self.device_buffer_size)
+        newest_slots = self.req_to_device_buffer[req_pool_indices, reserved_positions]
         last_logical = accepted_cache_locs[last_offsets]
         last_slots = accepted_device_locs[last_offsets]
-        self.req_device_buffer_tokens[:, req_pool_indices, self.device_buffer_size] = (
+        self.req_device_buffer_tokens[:, req_pool_indices, reserved_positions] = (
             last_positions.to(torch.int32).unsqueeze(0)
         )
-        self.req_device_buffer_token_locs[
-            :, req_pool_indices, self.device_buffer_size
-        ] = newest_slots.to(torch.int32)
+        self.req_device_buffer_token_locs[:, req_pool_indices, reserved_positions] = (
+            newest_slots.to(torch.int32)
+        )
         for idx in req_pool_indices.tolist():
             self._skip_first_backup[idx] = True
 
@@ -955,6 +995,28 @@ class HiSparseCoordinator:
                 src_indices=last_slots[~same_slot],
             )
         full_to_device_mapping[last_logical] = newest_slots
+
+        if backup_count > 0:
+            backup_positions_in_needs = (
+                torch.cumsum(needs_backup.to(torch.int64), dim=0) - 1
+            )
+            last_needs_backup = needs_backup[last_offsets]
+            post_backup_device_locs = backup_device_locs.clone()
+            if torch.any(last_needs_backup):
+                last_backup_offsets = backup_positions_in_needs[
+                    last_offsets[last_needs_backup]
+                ]
+                post_backup_device_locs[last_backup_offsets] = newest_slots[
+                    last_needs_backup
+                ]
+
+            logical_locs_to_clear_mask = needs_backup.clone()
+            logical_locs_to_clear_mask[last_offsets] = False
+            self._pending_draft_extend_backup = (
+                host_locs,
+                post_backup_device_locs,
+                accepted_cache_locs[logical_locs_to_clear_mask],
+            )
 
     def finalize_accepted_tokens_spec_v2(
         self,
