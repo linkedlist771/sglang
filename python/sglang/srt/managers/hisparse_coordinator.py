@@ -208,6 +208,41 @@ class HiSparseCoordinator:
             ),
         )
 
+    def compressed_host_len(self, full_len: int) -> int:
+        """Number of host slots needed for a committed full-token length."""
+        return max(0, full_len) // self.compress_ratio
+
+    def host_decode_reserve_len(self, full_len: int, num_decode_tokens: int) -> int:
+        """Extra host slots needed to keep decoding for `num_decode_tokens`."""
+        if num_decode_tokens <= 0:
+            return 0
+        return self.compressed_host_len(full_len + num_decode_tokens) - (
+            self.compressed_host_len(full_len)
+        )
+
+    def host_tokens_required_next_decode(
+        self, reqs: List[Req], speculative_token_budget: int = 0
+    ) -> int:
+        """Host slots that may be newly allocated by the next decode iteration.
+
+        `speculative_token_budget` is host-specific: it should cover accepted
+        draft tokens that may be backed up to host, not the full GPU draft KV
+        allocation used to run speculative verification.
+        """
+        required = 0
+        for req in reqs:
+            req_idx = self._req_pool_idx(req)
+            if self._skip_first_backup[req_idx]:
+                continue
+
+            seq_len = getattr(req, "kv_committed_len", None)
+            if seq_len is None:
+                seq_len = len(req.origin_input_ids) + len(req.output_ids)
+            if seq_len % self.compress_ratio == 0:
+                required += 1
+
+        return required + max(0, speculative_token_budget)
+
     def admit_request_into_staging(self, req: Req) -> None:
         req.hisparse_staging = True
 
@@ -1224,7 +1259,7 @@ class HiSparseCoordinator:
         # subsequent release_kv_cache -> allocator.free -> free_hisparse path
         # re-frees them (double-free into the page allocator's free list).
         allocated_len = req.kv_allocated_len
-        host_len = self.host_token_len(allocated_len)
+        host_len = self.compressed_host_len(allocated_len)
 
         # release memory -- only free actually-allocated buffer indices
         current_cap = int(self.req_device_buffer_size[req_idx])
@@ -1359,7 +1394,7 @@ class HiSparseCoordinator:
 
         preserve_len = len(req.origin_input_ids) + max(len(req.output_ids) - 1, 0)
         req_idx = self._req_pool_idx(req)
-        host_len = self.host_token_len(preserve_len)
+        host_len = self.compressed_host_len(preserve_len)
         stale_host_indices = self.req_to_host_pool[req_idx, host_len:]
         self._free_host_indices(stale_host_indices)
         self.req_to_host_pool[req_idx, host_len:] = -1

@@ -2434,6 +2434,29 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
 
         return self._new_tokens_required_next_decode_spec_v2(requests, page_size)
 
+    def _host_tokens_required_next_decode_spec(self, requests: List[Req]) -> int:
+        if (
+            self.hisparse_coordinator is None
+            or self.spec_algorithm.is_none()
+            or not self.hisparse_coordinator.supports_hisparse_draft_slots()
+        ):
+            return 0
+
+        server_args = get_global_server_args()
+        if self.is_spec_v2:
+            from sglang.srt.managers.utils import get_alloc_len_per_decode
+
+            max_accepted_tokens = get_alloc_len_per_decode() + 1
+        else:
+            max_accepted_tokens = (
+                max(
+                    server_args.speculative_num_steps or 0,
+                    server_args.speculative_num_draft_tokens or 0,
+                )
+                + 1
+            )
+        return max_accepted_tokens * len(requests)
+
     def _new_tokens_required_next_decode_spec_v2(self, requests, page_size):
         """Tight estimate matching eagle_info_v2.prepare_for_decode allocation."""
         reserve = get_alloc_reserve_per_decode()
@@ -2448,7 +2471,24 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
     def check_decode_mem(self, selected_indices: Optional[List[int]] = None):
         num_tokens = self.new_tokens_required_next_decode(selected_indices)
         evict_from_tree_cache(self.tree_cache, num_tokens)
-        return self.token_to_kv_pool_allocator.available_size() >= num_tokens
+        if self.token_to_kv_pool_allocator.available_size() < num_tokens:
+            return False
+
+        if self.hisparse_coordinator is None:
+            return True
+
+        requests = (
+            self.reqs
+            if selected_indices is None
+            else [self.reqs[i] for i in selected_indices]
+        )
+        host_required = self.hisparse_coordinator.host_tokens_required_next_decode(
+            requests,
+            speculative_token_budget=self._host_tokens_required_next_decode_spec(
+                requests
+            ),
+        )
+        return self.hisparse_coordinator.mem_pool_host.available_size() >= host_required
 
     def retract_all(self, server_args: ServerArgs):
         retracted_reqs = retract_all(

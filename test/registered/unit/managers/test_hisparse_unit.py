@@ -62,6 +62,27 @@ def _make_req(rid="test-req-0", origin_input_ids=None, output_ids=None):
     return req
 
 
+def test_next_decode_host_budget_counts_only_new_allocations():
+    from sglang.srt.managers.hisparse_coordinator import HiSparseCoordinator
+
+    coordinator = HiSparseCoordinator.__new__(HiSparseCoordinator)
+    coordinator.compress_ratio = 1
+    coordinator._skip_first_backup = [False]
+    coordinator._pending_draft_extend_backup = (
+        torch.arange(8, dtype=torch.int64),
+        torch.arange(8, dtype=torch.int64),
+        torch.arange(8, dtype=torch.int64),
+    )
+    req = _make_req("host-budget", list(range(4)))
+    req.req_pool_idx = 0
+    req.kv_committed_len = 4
+
+    assert (
+        coordinator.host_tokens_required_next_decode([req], speculative_token_budget=3)
+        == 4
+    )
+
+
 class TestHiSparseUnit(unittest.TestCase):
     """Test class that builds a minimal HiSparse component stack."""
 
