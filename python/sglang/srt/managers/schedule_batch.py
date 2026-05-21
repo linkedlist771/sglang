@@ -1607,11 +1607,24 @@ def release_req(
     token_to_kv_pool_allocator: BaseTokenToKVPoolAllocator,
     tree_cache: BasePrefixCache,
     hisparse_coordinator: Optional[HiSparseCoordinator],
-) -> None:
-    if hisparse_coordinator is not None and not req.finished():
-        hisparse_coordinator.retract_req(req)
+) -> bool:
+    should_retract = not isinstance(getattr(req, "to_finish", None), FINISH_ABORT)
 
-    if server_args.disaggregation_mode == "decode":
+    if hisparse_coordinator is not None and not req.finished():
+        if not should_retract:
+            hisparse_coordinator.request_finished(req)
+        else:
+            should_retract = hisparse_coordinator.retract_req(req)
+            if not should_retract:
+                req.to_finish = FINISH_ABORT(
+                    "HiSparse preallocated host KV pool had no free slots while "
+                    "backing up the request for retract. Aborting this request "
+                    "instead of crashing the scheduler.",
+                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                hisparse_coordinator.request_finished(req)
+
+    if server_args.disaggregation_mode == "decode" and hisparse_coordinator is None:
         req.offload_kv_cache(req_to_token_pool, token_to_kv_pool_allocator)
     # TODO (csy): for preempted requests, we may want to insert into the tree
     release_kv_cache(req, tree_cache, is_insert=False)
@@ -1619,7 +1632,9 @@ def release_req(
     num_tokens = remaing_req_count * envs.SGLANG_RETRACT_DECODE_STEPS.get()
     evict_from_tree_cache(tree_cache, num_tokens)
 
-    req.reset_for_retract()
+    if should_retract:
+        req.reset_for_retract()
+    return should_retract
 
 
 def retract_all(
@@ -2468,6 +2483,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             )
 
         retracted_reqs = []
+        reqs_to_abort: List[Req] = []
         first_iter = True
         while first_iter or (
             not self.check_decode_mem(selected_indices=sorted_indices)
@@ -2479,11 +2495,12 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             first_iter = False
             idx = sorted_indices.pop()
             req = self.reqs[idx]
-            retracted_reqs.append(req)
             # release memory and don't insert into the tree because we need the space instantly
-            self.release_req(idx, len(sorted_indices), server_args)
+            if self.release_req(idx, len(sorted_indices), server_args):
+                retracted_reqs.append(req)
+            else:
+                reqs_to_abort.append(req)
 
-        reqs_to_abort: List[Req] = []
         if len(sorted_indices) <= 1 and not self.check_decode_mem(
             selected_indices=sorted_indices
         ):
@@ -2511,8 +2528,10 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
 
         return retracted_reqs, new_estimate_ratio, reqs_to_abort
 
-    def release_req(self, idx: int, remaing_req_count: int, server_args: ServerArgs):
-        release_req(
+    def release_req(
+        self, idx: int, remaing_req_count: int, server_args: ServerArgs
+    ) -> bool:
+        return release_req(
             req=self.reqs[idx],
             remaing_req_count=remaing_req_count,
             server_args=server_args,

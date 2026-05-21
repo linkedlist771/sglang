@@ -833,6 +833,14 @@ class SchedulerBatchResultProcessor:
                 # Asynchronously offload KV cache; release_kv_cache will be called after Device->Host transfer completes
                 if not self.decode_offload_manager.offload_kv_cache(req):
                     self.decode_offload_manager.finalize_release_on_finish(req)
+            elif req.req_pool_idx is None:
+                logger.warning(
+                    "Skip KV release for finished req %s because req_pool_idx is "
+                    "already None (kv_committed_freed=%s, kv_overallocated_freed=%s)",
+                    req.rid,
+                    req.kv_committed_freed,
+                    req.kv_overallocated_freed,
+                )
             else:
                 if self.server_args.enable_hisparse:
                     self.hisparse_coordinator.request_finished(req)

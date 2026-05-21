@@ -197,11 +197,21 @@ class HiSparseTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
         backup_state: bool = False,
     ):
         """Allocate logical indices and map them to caller-managed HiSparse slots."""
-        avail = self.logical_attn_allocator.available_size()
-        if avail < extend_num_tokens:
+        num_new_pages = get_num_new_pages(
+            seq_lens=seq_lens_cpu,
+            page_size=self.page_size,
+            prefix_lens=prefix_lens_cpu,
+        )
+        if self.logical_attn_allocator.need_sort and num_new_pages > len(
+            self.logical_attn_allocator.free_pages
+        ):
+            self.logical_attn_allocator.merge_and_sort_free()
+        avail_pages = len(self.logical_attn_allocator.free_pages)
+        if num_new_pages > avail_pages:
             raise RuntimeError(
-                f"HiSparse logical alloc: need {extend_num_tokens} tokens but only "
-                f"{avail} are available."
+                f"HiSparse logical alloc: need {num_new_pages} new pages for "
+                f"{extend_num_tokens} tokens but only {avail_pages} pages are "
+                "available."
             )
 
         logical_state = (

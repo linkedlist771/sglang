@@ -1210,17 +1210,12 @@ class HiSparseCoordinator:
         self._skip_first_backup[req.req_pool_idx] = False
         req.hisparse_staging = False
 
-    def retract_req(self, req: Req) -> None:
-        if req.hisparse_staging:
-            self.abort_staging_request(req)
-        else:
-            self.request_finished(req)
-
-    def request_finished(self, req: Req):
+    def _clear_req_device_state(self, req: Req) -> int:
         # release resources only after the execution of a potential overlapped batch
         if self.decode_producer_stream is not None:
             device_module.current_stream().wait_stream(self.decode_producer_stream)
         self.wait_for_pending_backup()
+        req_idx = self._req_pool_idx(req)
 
         # Use kv_allocated_len (not seqlen): under speculative decoding the
         # allocator can over-allocate beyond the committed seqlen, and those
@@ -1229,40 +1224,169 @@ class HiSparseCoordinator:
         # subsequent release_kv_cache -> allocator.free -> free_hisparse path
         # re-frees them (double-free into the page allocator's free list).
         allocated_len = req.kv_allocated_len
+        host_len = self.host_token_len(allocated_len)
 
         # release memory -- only free actually-allocated buffer indices
-        current_cap = int(self.req_device_buffer_size[req.req_pool_idx])
+        current_cap = int(self.req_device_buffer_size[req_idx])
         if current_cap > 0:
-            side_buf_hi = self.req_to_device_buffer[req.req_pool_idx, :current_cap]
+            side_buf_hi = self.req_to_device_buffer[req_idx, :current_cap]
             all_hi = torch.unique(side_buf_hi[side_buf_hi > 0])
             if all_hi.numel() > 0:
                 self.token_to_kv_pool_allocator.free_hisparse_indices(all_hi)
 
-        allocated_locs = self.req_to_token_pool.req_to_token[
-            req.req_pool_idx, :allocated_len
-        ]
+        allocated_locs = self.req_to_token_pool.req_to_token[req_idx, :allocated_len]
         compressed_locs = self.mem_pool_device.translate_loc_from_full_to_compressed(
             allocated_locs
         )
         self.mem_pool_device.full_to_hisparse_device_index_mapping[compressed_locs] = 0
 
-        host_indices = self.mem_pool_host.allocated_host_indices(
-            self.req_to_host_pool,
-            req.req_pool_idx,
-            self.req_to_host_pool_allocated_len[req.req_pool_idx],
-        )
+        # clear req info
+        self.req_device_buffer_tokens[:, req_idx, :] = -1
+        self.req_device_buffer_token_locs[:, req_idx, :] = -1
+        self.req_to_device_buffer[req_idx, :] = 0
+        self.req_device_buffer_size[req_idx] = 0
+        self.lru_slots[:, req_idx, :].copy_(self._lru_init)
+        self._skip_first_backup[req_idx] = False
+        return host_len
+
+    def _free_host_indices(self, host_indices: torch.Tensor) -> None:
+        host_indices = host_indices[host_indices >= 0]
         if host_indices.numel() > 0:
             self.mem_pool_host.free(host_indices)
 
-        # clear req info
-        self.req_device_buffer_tokens[:, req.req_pool_idx, :] = -1
-        self.req_device_buffer_token_locs[:, req.req_pool_idx, :] = -1
-        self.req_to_device_buffer[req.req_pool_idx, :] = 0
-        self.req_device_buffer_size[req.req_pool_idx] = 0
-        self.req_to_host_pool[req.req_pool_idx, :] = -1
-        self.req_to_host_pool_allocated_len[req.req_pool_idx] = 0
-        self.lru_slots[:, req.req_pool_idx, :].copy_(self._lru_init)
-        self._skip_first_backup[req.req_pool_idx] = False
+    @staticmethod
+    def _req_pool_idx(req: Req) -> int:
+        req_idx = req.req_pool_idx
+        if isinstance(req_idx, torch.Tensor):
+            if req_idx.numel() != 1:
+                raise ValueError(
+                    f"HiSparse req {req.rid} has non-scalar req_pool_idx: "
+                    f"shape={tuple(req_idx.shape)} value={req_idx}"
+                )
+            req_idx = int(req_idx.item())
+            req.req_pool_idx = req_idx
+        return req_idx
+
+    def _clear_retracted_host_indices(self, req: Req) -> None:
+        if hasattr(req, "hisparse_retracted_host_indices"):
+            del req.hisparse_retracted_host_indices
+        if hasattr(req, "hisparse_retracted_host_len"):
+            del req.hisparse_retracted_host_len
+
+    def release_retracted_req(self, req: Req) -> None:
+        host_indices = getattr(req, "hisparse_retracted_host_indices", None)
+        if host_indices is not None:
+            self._free_host_indices(host_indices)
+        self._clear_retracted_host_indices(req)
+
+    def pop_retracted_host_indices(
+        self, req: Req, host_len: int
+    ) -> Union[torch.Tensor, None]:
+        host_indices = getattr(req, "hisparse_retracted_host_indices", None)
+        if host_indices is None:
+            return None
+        if host_indices.numel() < host_len:
+            raise RuntimeError(
+                f"HiSparse retracted host indices too short for req {req.rid}: "
+                f"{host_indices.numel()} < {host_len}"
+            )
+
+        restored_indices = host_indices[:host_len].to(device=self.device)
+        self._free_host_indices(host_indices[host_len:])
+        self._clear_retracted_host_indices(req)
+        return restored_indices
+
+    def _ensure_host_backed(self, req: Req, preserve_len: int, host_len: int) -> bool:
+        host_indices = self.req_to_host_pool[req.req_pool_idx, :host_len]
+        missing_positions = torch.nonzero(host_indices < 0, as_tuple=False).flatten()
+        if missing_positions.numel() == 0:
+            return True
+
+        if self.compress_ratio == 1:
+            full_positions = missing_positions
+        else:
+            full_positions = missing_positions * self.compress_ratio + (
+                self.compress_ratio - 1
+            )
+            if torch.any(full_positions >= preserve_len):
+                logger.warning(
+                    "HiSparse cannot retract req %s: compressed host positions map "
+                    "past preserve_len (%s >= %s)",
+                    req.rid,
+                    full_positions.tolist(),
+                    preserve_len,
+                )
+                return False
+
+        logical_locs = self.req_to_token_pool.req_to_token[
+            req.req_pool_idx, full_positions
+        ]
+        compressed_locs = self.mem_pool_device.translate_loc_from_full_to_compressed(
+            logical_locs
+        )
+        device_locs = self.mem_pool_device.full_to_hisparse_device_index_mapping[
+            compressed_locs
+        ]
+        if torch.any(device_locs <= 0):
+            bad_positions = missing_positions[device_locs <= 0].tolist()
+            logger.warning(
+                "HiSparse cannot retract req %s: host backup is missing and no "
+                "live device mapping exists for positions %s",
+                req.rid,
+                bad_positions,
+            )
+            return False
+
+        new_host_indices = self.mem_pool_host.alloc(missing_positions.numel())
+        if new_host_indices is None:
+            logger.warning(
+                "HiSparse cannot retract req %s: host mem pool alloc failed for "
+                "%d backup tokens, available=%d",
+                req.rid,
+                missing_positions.numel(),
+                self.mem_pool_host.available_size(),
+            )
+            return False
+        new_host_indices = new_host_indices.to(device=self.device)
+        self._backup_device_locs_to_host(new_host_indices, device_locs)
+        self.req_to_host_pool[req.req_pool_idx, missing_positions] = new_host_indices
+        return True
+
+    def retract_req(self, req: Req) -> bool:
+        if req.hisparse_staging:
+            self.abort_staging_request(req)
+            return True
+
+        preserve_len = len(req.origin_input_ids) + max(len(req.output_ids) - 1, 0)
+        req_idx = self._req_pool_idx(req)
+        host_len = self.host_token_len(preserve_len)
+        stale_host_indices = self.req_to_host_pool[req_idx, host_len:]
+        self._free_host_indices(stale_host_indices)
+        self.req_to_host_pool[req_idx, host_len:] = -1
+        if not self._ensure_host_backed(req, preserve_len, host_len):
+            return False
+        req.hisparse_retracted_host_indices = self.req_to_host_pool[
+            req_idx, :host_len
+        ].clone()
+        req.hisparse_retracted_host_len = host_len
+        self._clear_req_device_state(req)
+        self.req_to_host_pool[req_idx, :] = -1
+        self.req_to_host_pool_allocated_len[req_idx] = 0
+        return True
+
+    def request_finished(self, req: Req):
+        req_idx = self._req_pool_idx(req)
+        self._clear_req_device_state(req)
+
+        host_indices = self.mem_pool_host.allocated_host_indices(
+            self.req_to_host_pool,
+            req_idx,
+            self.req_to_host_pool_allocated_len[req_idx],
+        )
+        self._free_host_indices(host_indices)
+        self.req_to_host_pool[req_idx, :] = -1
+        self.req_to_host_pool_allocated_len[req_idx] = 0
+        self._clear_retracted_host_indices(req)
 
     def swap_in_selected_pages(
         self,

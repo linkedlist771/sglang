@@ -3880,8 +3880,11 @@ class Scheduler(
                 remaining_retracted = []
                 for decode_req in self.disagg_decode_prealloc_queue.retracted_queue:
                     if recv_req.abort_all or decode_req.rid.startswith(recv_req.rid):
-                        assert hasattr(decode_req, "kv_cache_cpu")
-                        del decode_req.kv_cache_cpu
+                        if self.enable_hisparse:
+                            self.hisparse_coordinator.release_retracted_req(decode_req)
+                        else:
+                            assert hasattr(decode_req, "kv_cache_cpu")
+                            del decode_req.kv_cache_cpu
                         self.ipc_channels.send_to_tokenizer.send_output(
                             AbortReq(rid=decode_req.rid), decode_req
                         )
