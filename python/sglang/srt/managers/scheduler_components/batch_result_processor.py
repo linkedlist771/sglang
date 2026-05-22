@@ -834,6 +834,8 @@ class SchedulerBatchResultProcessor:
                 if not self.decode_offload_manager.offload_kv_cache(req):
                     self.decode_offload_manager.finalize_release_on_finish(req)
             elif req.req_pool_idx is None:
+                if getattr(req, "mamba_pool_idx", None) is not None:
+                    release_kv_cache(req, self.tree_cache)
                 logger.warning(
                     "Skip KV release for finished req %s because req_pool_idx is "
                     "already None (kv_committed_freed=%s, kv_overallocated_freed=%s)",
