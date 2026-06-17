@@ -108,17 +108,17 @@ class TestUnifiedQwen3HiCachePP(UnifiedRadixTreeTestMixin, CustomTestCase):
         kill_process_tree(cls.process.pid)
 
 
-# ─── Qwen3-30B-A3B-FP8 + HiCache L3 (file backend) + PP ─────────────────
+# ─── Qwen3-32B + HiCache L3 (file backend) + PP ─────────────────
 
 
 class TestUnifiedQwen3HiCachePPL3(AccuracyTwoPassMixin, CustomTestCase):
-    """Qwen3-30B-A3B-FP8 + HiCache L3 (file backend) + PP + UnifiedRadixCache."""
+    """Qwen3-32B + HiCache L3 (file backend) + PP + UnifiedRadixCache."""
 
     gsm8k_threshold = 0.8
 
     @classmethod
     def setUpClass(cls):
-        cls.model = QWEN3_30B_MODEL
+        cls.model = QWEN3_32B_MODEL
         cls.base_url = DEFAULT_URL_FOR_TEST
         cls.hicache_dir = tempfile.mkdtemp(prefix="hicache_l3_pp_")
         cls.process = popen_launch_server(
@@ -135,6 +135,8 @@ class TestUnifiedQwen3HiCachePPL3(AccuracyTwoPassMixin, CustomTestCase):
                 "0.8",
                 "--cuda-graph-max-bs",
                 "32",
+                "--max-total-tokens",
+                "14000",
                 "--disable-piecewise-cuda-graph",
                 "--model-loader-extra-config",
                 '{"enable_multithread_load": true, "num_threads": 64}',
