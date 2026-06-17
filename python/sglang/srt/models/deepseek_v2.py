@@ -2475,7 +2475,19 @@ class DeepseekV2Model(nn.Module):
             elif self.first_k_dense_replace < normal_start_layer:
                 normal_end_layer = normal_start_layer = 0
         aux_hidden_states = []
-        topk_indices = None
+        # skip_topk layers reuse the prev layer's topk; across PP the prev
+        # layer is on the previous rank, so carry it via the proxy. Gated to
+        # configs where topk keeps its per-rank layout across the PP send.
+        pp_carry_topk = get_attention_tp_size() == 1 or self.dsa_enable_prefill_cp
+        topk_indices = (
+            pp_proxy_tensors.tensors.get("topk_indices")
+            if (
+                pp_carry_topk
+                and pp_proxy_tensors is not None
+                and not self.pp_group.is_first_rank
+            )
+            else None
+        )
         for i in range(normal_start_layer, normal_end_layer):
             # NOTE: torch dynamo does not support graph break in context manager
             ctx = (
@@ -2524,12 +2536,14 @@ class DeepseekV2Model(nn.Module):
                 residual,
                 self.layers[self.end_layer - 1].layer_scatter_modes,
             )
-            return PPProxyTensors(
-                {
-                    "hidden_states": hidden_states,
-                    "residual": residual,
-                }
-            )
+            proxy_tensors = {
+                "hidden_states": hidden_states,
+                "residual": residual,
+            }
+            # Pass topk to the next rank's skip_topk layers (see pp_carry_topk).
+            if pp_carry_topk and topk_indices is not None:
+                proxy_tensors["topk_indices"] = topk_indices
+            return PPProxyTensors(proxy_tensors)
         else:
             if not forward_batch.forward_mode.is_idle():
                 if residual is None:

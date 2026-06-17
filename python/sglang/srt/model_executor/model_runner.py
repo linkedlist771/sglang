@@ -61,7 +61,9 @@ from sglang.srt.configs.model_config import (
     AttentionArch,
     ModelConfig,
     ModelImpl,
+    get_dsa_index_topk,
     get_num_indexer_layers,
+    is_deepseek_dsa,
 )
 from sglang.srt.configs.update_config import adjust_config_with_unaligned_cpu_tp
 from sglang.srt.constants import GPU_MEMORY_TYPE_WEIGHTS
@@ -2761,9 +2763,28 @@ class ModelRunner(ModelRunnerKVCacheMixin):
                 and self.attn_cp_size > 1
             ):
                 pp_hidden_tokens = num_tokens // self.attn_cp_size
-            pp_proxy_tensors = PPProxyTensors(
-                {k: v[:pp_hidden_tokens] for k, v in buffers.pp_proxy_tensors.items()}
+            proxy_tensors = {
+                k: v[:pp_hidden_tokens] for k, v in buffers.pp_proxy_tensors.items()
+            }
+            # DSA carries topk across PP via the proxy (see deepseek_v2). The
+            # warmup runs each rank in isolation, so seed a throwaway topk for
+            # non-first ranks to keep the dummy forward self-consistent.
+            pp_carry_topk = (
+                get_attention_tp_size() == 1
+                or self.server_args.enable_dsa_prefill_context_parallel
             )
+            if (
+                self.pp_rank != 0
+                and pp_carry_topk
+                and is_deepseek_dsa(self.model_config.hf_config)
+            ):
+                index_topk = get_dsa_index_topk(self.model_config.hf_config)
+                proxy_tensors["topk_indices"] = torch.zeros(
+                    (pp_hidden_tokens, index_topk),
+                    dtype=torch.int32,
+                    device=self.device,
+                )
+            pp_proxy_tensors = PPProxyTensors(proxy_tensors)
 
         if require_mlp_tp_gather_:
             global_num_tokens_cpu = [num_tokens] * self.server_args.dp_size
