@@ -766,7 +766,9 @@ class Req(ReqDllmMixin):
 
         # For req-level memory management
         self.kv_committed_len = 0
-        self.kv: ReqKvInfo = ReqKvInfo(kv_allocated_len=0, swa_evicted_seqlen=0)
+        # Owned-KV info. None == this req holds no KV allocation (in lockstep
+        # with req_pool_idx). Created on alloc, cleared on free.
+        self.kv: Optional[ReqKvInfo] = None
 
         # for corss-endoder model
         self.token_type_ids = token_type_ids
@@ -1547,9 +1549,11 @@ class Req(ReqDllmMixin):
         self.mamba_cow_src_index = None
         self.mamba_needs_clear = False
         self.already_computed = 0
-        self.kv_allocated_len = 0
+        # kv is already None here: retract frees KV (release_kv_cache ->
+        # ReqToTokenPool.free) before reset_for_retract runs, so the owned-KV
+        # fields live on a fresh ReqKvInfo created at the next alloc. Only the
+        # bare committed length is reset.
         self.kv_committed_len = 0
-        self.swa_evicted_seqlen = 0
         self.extend_batch_idx = 0
         self.decode_batch_idx = 0
         self.fill_len = 0

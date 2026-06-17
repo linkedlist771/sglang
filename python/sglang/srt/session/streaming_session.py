@@ -103,19 +103,15 @@ class SessionSlot:
 
         self.mamba = copy.copy(req.mamba)
 
-        # Ownership has transferred to the slot. Null *all* of the req's
-        # references so any later alloc()/free path that inspects the req
-        # (e.g. the alloc-skip check on `req.mamba_ping_pong_track_buffer
-        # is None`, or the retract cleanup) sees no dangling pointers
-        # into slot-owned tensors. Without this the alloc path can decide
-        # the req still has a ping-pong buffer and skip alloc, causing
-        # the slot's tensor to be reused by a new req and leaked when
-        # the slot is later freed.
-        # TODO: to form real move semantics the slot should TAKE these objects
-        # and the req side should be `req.kv = None` / `req.mamba = None` /
-        # (is_first) `req.cache = None`, instead of the copy.copy above and the
-        # field-level nulling below. Kept as-is to preserve original behavior.
+        # Ownership has transferred to the slot. The req no longer holds KV, so
+        # clear req.kv in lockstep with req_pool_idx (kv is None == no KV held).
+        # The mamba fields are still nulled field-by-field (opid6 only moves kv;
+        # mamba/cache move is a later sub-step).
+        # TODO: to form real move semantics for mamba/cache the req side should
+        # be `req.mamba = None` / (is_first) `req.cache = None` instead of the
+        # copy.copy above and the field-level nulling below.
         req.req_pool_idx = None
+        req.kv = None
         req.mamba_pool_idx = None
         req.mamba_ping_pong_track_buffer = None
         req.mamba_next_track_idx = None
@@ -336,6 +332,7 @@ class StreamingSession(BasePrefixCache):
             )
             self.release_session(session_id)
             req.req_pool_idx = None
+            req.kv = None
             req.session.abort_req()
             return True
 
