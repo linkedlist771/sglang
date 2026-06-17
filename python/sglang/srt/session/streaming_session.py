@@ -100,16 +100,17 @@ class SessionSlot:
 
         if is_first:
             self.cache = copy.copy(req.cache)
+            req.cache = None
 
         self.mamba = copy.copy(req.mamba)
 
-        # Ownership has transferred to the slot. The req no longer holds KV, so
-        # clear req.kv in lockstep with req_pool_idx (kv is None == no KV held).
-        # The mamba fields are still nulled field-by-field (opid6 only moves kv;
-        # mamba/cache move is a later sub-step).
-        # TODO: to form real move semantics for mamba/cache the req side should
-        # be `req.mamba = None` / (is_first) `req.cache = None` instead of the
-        # copy.copy above and the field-level nulling below.
+        # Ownership has transferred to the slot. The req no longer holds KV or
+        # cache state, so clear req.kv (in lockstep with req_pool_idx) and, on
+        # the first turn, req.cache. The mamba fields are still nulled
+        # field-by-field (mamba presence is a later sub-step).
+        # TODO: to form real move semantics for mamba the req side should be
+        # `req.mamba = None` instead of the copy.copy above and the field-level
+        # nulling below.
         req.req_pool_idx = None
         req.kv = None
         req.mamba_pool_idx = None
@@ -333,6 +334,7 @@ class StreamingSession(BasePrefixCache):
             self.release_session(session_id)
             req.req_pool_idx = None
             req.kv = None
+            req.cache = None
             req.session.abort_req()
             return True
 
