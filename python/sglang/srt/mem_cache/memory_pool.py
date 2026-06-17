@@ -783,7 +783,8 @@ class HybridReqToTokenPool(ReqToTokenPool):
     def free_mamba_cache(
         self, req: Req, mamba_ping_pong_track_buffer_to_keep: Optional[int] = None
     ):
-        mamba_index = req.mamba_pool_idx
+        assert req.mamba is not None, "double free? req.mamba is None"
+        mamba_index = req.mamba.mamba_pool_idx
         assert mamba_index is not None, "double free? mamba_index is None"
         self.mamba_allocator.free(mamba_index.unsqueeze(0))
 
