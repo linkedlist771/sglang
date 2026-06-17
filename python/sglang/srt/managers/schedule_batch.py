@@ -809,13 +809,10 @@ class Req(ReqDllmMixin):
 
         # Memory pool info
         self.req_pool_idx: Optional[int] = None
-        self.mamba: ReqMambaInfo = ReqMambaInfo(
-            mamba_pool_idx=None,
-            mamba_ping_pong_track_buffer=None,
-            mamba_next_track_idx=None,
-            mamba_last_track_seqlen=None,
-            mamba_branching_seqlen=None,
-        )
+        # Owned-mamba info. None == this req holds no mamba pool slot (always
+        # None for non-mamba models). Created when a mamba slot is first
+        # allocated / COW'd, cleared on free.
+        self.mamba: Optional[ReqMambaInfo] = None
         # Deferred COW: source mamba pool index from radix cache node (copy on forward stream)
         self.mamba_cow_src_index: Optional[torch.Tensor] = None
         # Deferred clear: newly allocated mamba slot needs zeroing on forward stream
@@ -1277,7 +1274,6 @@ class Req(ReqDllmMixin):
                 self.host_hit_length,
                 self.swa_host_hit_length,
                 self.mamba_host_hit_length,
-                self.mamba_branching_seqlen,
             ) = (
                 match_result.device_indices,
                 match_result.last_device_node,
@@ -1286,8 +1282,15 @@ class Req(ReqDllmMixin):
                 match_result.host_hit_length,
                 match_result.swa_host_hit_length,
                 match_result.mamba_host_hit_length,
-                match_result.mamba_branching_seqlen,
             )
+            # mamba_branching_seqlen only applies to a req that holds a mamba
+            # slot (created by the COW inside the match_prefix above). Setting it
+            # on a mamba-less req would write through a None self.mamba.
+            if (
+                match_result.mamba_branching_seqlen is not None
+                and self.mamba is not None
+            ):
+                self.mamba.mamba_branching_seqlen = match_result.mamba_branching_seqlen
             if match_result.cache_protected_len is not None:
                 self.cache_protected_len = match_result.cache_protected_len
             else:
@@ -1547,11 +1550,10 @@ class Req(ReqDllmMixin):
         self.temp_input_top_logprobs_idx = None
         self.extend_logprob_start_len = 0
         self.inflight_middle_chunks = 0
-        self.mamba_pool_idx = None
-        self.mamba_ping_pong_track_buffer = None
-        self.mamba_next_track_idx = None
-        self.mamba_last_track_seqlen = None
-        self.mamba_branching_seqlen = None
+        # mamba is already None here: retract frees the mamba slot
+        # (release_kv_cache -> cache_finished_req/free_mamba_cache forces a
+        # mamba free) before reset_for_retract runs, so a fresh ReqMambaInfo is
+        # created at the next alloc. These plain attributes are not part of it.
         self.mamba_cow_src_index = None
         self.mamba_needs_clear = False
         self.already_computed = 0
@@ -2341,7 +2343,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             )
 
         # Collect mamba init info for deferred ops on forward stream
-        if any(req.mamba_pool_idx is not None for req in reqs):
+        if any(req.mamba is not None for req in reqs):
             self._collect_deferred_mamba_cow_and_clear(reqs)
 
         if self.model_config.is_encoder_decoder:

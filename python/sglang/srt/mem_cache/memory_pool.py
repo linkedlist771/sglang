@@ -640,17 +640,29 @@ class HybridReqToTokenPool(ReqToTokenPool):
         if select_index is None:
             return None
 
+        from sglang.srt.managers.schedule_batch import ReqMambaInfo
+
         mamba_indices: list[torch.Tensor] = []
         mamba_ping_pong_track_buffers: list[torch.Tensor] = []
         for req in reqs:
-            if req.mamba_pool_idx is not None:  # for radix cache / continuing chunked
+            if req.mamba is not None and req.mamba.mamba_pool_idx is not None:
+                # radix cache / continuing chunked: slot already held
                 pass
             else:
                 mid = self.mamba_allocator.alloc(1)
                 assert (
                     mid is not None
                 ), f"Not enough space for mamba cache, try to increase --mamba-full-memory-ratio or --max-mamba-cache-size. {mid=}, {self.mamba_pool.size=}, {self.mamba_allocator.available_size()=}, {len(reqs)=}"
-                req.mamba_pool_idx = mid[0]
+                if req.mamba is None:
+                    req.mamba = ReqMambaInfo(
+                        mamba_pool_idx=mid[0],
+                        mamba_ping_pong_track_buffer=None,
+                        mamba_next_track_idx=None,
+                        mamba_last_track_seqlen=None,
+                        mamba_branching_seqlen=None,
+                    )
+                else:
+                    req.mamba.mamba_pool_idx = mid[0]
                 req.mamba_needs_clear = True
             mamba_indices.append(req.mamba_pool_idx)
             if self.enable_mamba_extra_buffer:
@@ -774,7 +786,6 @@ class HybridReqToTokenPool(ReqToTokenPool):
         mamba_index = req.mamba_pool_idx
         assert mamba_index is not None, "double free? mamba_index is None"
         self.mamba_allocator.free(mamba_index.unsqueeze(0))
-        req.mamba_pool_idx = None
 
         if self.enable_mamba_extra_buffer:
             mamba_ping_pong_track_buffer_to_free = (
@@ -814,12 +825,11 @@ class HybridReqToTokenPool(ReqToTokenPool):
                     ]
                 )
             self.mamba_allocator.free(mamba_ping_pong_track_buffer_to_free)
-            # Match the req.mamba_pool_idx=None clear above so the next
-            # alloc() doesn't see a stale ping-pong reference on the req
-            # and skip allocation (which would silently reuse a freed
-            # tensor on the req side while the new pool slot leaks).
-            req.mamba_ping_pong_track_buffer = None
-            req.mamba_next_track_idx = None
+
+        # Drop the whole object so the next alloc() does not see a stale slot or
+        # ping-pong reference on the req (which would skip allocation and
+        # silently reuse a freed tensor while the new pool slot leaks).
+        req.mamba = None
 
     def clear(self):
         logger.info("Reset HybridReqToTokenPool")

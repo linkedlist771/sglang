@@ -102,22 +102,17 @@ class SessionSlot:
             self.cache = copy.copy(req.cache)
             req.cache = None
 
-        self.mamba = copy.copy(req.mamba)
+        # Leave the slot's default (empty) mamba in place when the req holds no
+        # mamba slot, so slot.mamba stays non-None for the slot-side readers.
+        if req.mamba is not None:
+            self.mamba = copy.copy(req.mamba)
 
-        # Ownership has transferred to the slot. The req no longer holds KV or
-        # cache state, so clear req.kv (in lockstep with req_pool_idx) and, on
-        # the first turn, req.cache. The mamba fields are still nulled
-        # field-by-field (mamba presence is a later sub-step).
-        # TODO: to form real move semantics for mamba the req side should be
-        # `req.mamba = None` instead of the copy.copy above and the field-level
-        # nulling below.
+        # Ownership has transferred to the slot. The req no longer holds KV,
+        # cache or mamba state, so clear them all (kv/req_pool_idx in lockstep,
+        # cache on the first turn, mamba as a whole object).
         req.req_pool_idx = None
         req.kv = None
-        req.mamba_pool_idx = None
-        req.mamba_ping_pong_track_buffer = None
-        req.mamba_next_track_idx = None
-        req.mamba_last_track_seqlen = None
-        req.mamba_branching_seqlen = None
+        req.mamba = None
 
     def restore_to_req(self, req: Req):
         """Restore KV state from this slot into an incoming request."""
@@ -125,7 +120,11 @@ class SessionSlot:
         req.kv_committed_len = self.kv_committed_len
         req.kv = copy.copy(self.kv)
         req.swa_uuid_for_lock = self.cache.swa_uuid_for_lock
-        req.mamba = copy.copy(self.mamba)
+        # Only hand the req a mamba object when the slot actually holds a mamba
+        # slot; otherwise the req holds no mamba state (req.mamba stays None).
+        req.mamba = (
+            copy.copy(self.mamba) if self.mamba.mamba_pool_idx is not None else None
+        )
 
         # NOTE: req_pool_idx and mamba_pool_idx are intentionally NOT cleared
         # from the slot. During chunked prefill, a request may be rejected by
@@ -320,14 +319,14 @@ class StreamingSession(BasePrefixCache):
                     req_pool_idx=req.req_pool_idx,
                     kv=copy.copy(req.kv),
                     cache=copy.copy(req.cache),
-                    mamba=copy.copy(req.mamba),
+                    mamba=(
+                        copy.copy(req.mamba) if req.mamba is not None else _new_mamba()
+                    ),
                 )
                 self.slots[session_id] = slot
                 # Slot now owns these resources — drop the req's refs so
                 # the abort fall-through doesn't double-free.
-                # TODO: with real move semantics this would be `req.mamba = None`.
-                req.mamba_pool_idx = None
-                req.mamba_ping_pong_track_buffer = None
+                req.mamba = None
             slot.kv.kv_allocated_len = max(
                 slot.kv.kv_allocated_len, req.kv_allocated_len
             )
