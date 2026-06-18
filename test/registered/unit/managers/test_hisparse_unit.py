@@ -497,6 +497,7 @@ class TestHiSparseUnit(unittest.TestCase):
             out_cache_loc=kv_loc[-1:],
             req_pool_indices=req_pool_indices,
             seq_lens_cpu=seq_lens_cpu,
+            req_pool_indices_cpu=torch.tensor([req_idx], dtype=torch.int64),
         )
 
         newest_slot = self.coordinator.req_to_device_buffer[req_idx, DEVICE_BUFFER_SIZE]
@@ -895,9 +896,9 @@ class TestHiSparseUnit(unittest.TestCase):
         ].clone()
         self.coordinator.mem_pool_host.free(old_host_index)
         self.coordinator.req_to_host_pool[req.req_pool_idx, missing_pos] = -1
-        filler = self.coordinator.mem_pool_host.alloc(
-            self.coordinator.mem_pool_host.available_size()
-        )
+        available = self.coordinator.mem_pool_host.available_size()
+        filler_size = available - available % self.coordinator.mem_pool_host.page_size
+        filler = self.coordinator.mem_pool_host.alloc(filler_size)
         self.assertIsNotNone(filler, "Host filler alloc failed")
 
         newest_slot = self.coordinator.req_to_device_buffer[

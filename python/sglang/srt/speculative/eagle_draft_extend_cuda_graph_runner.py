@@ -260,9 +260,10 @@ class EAGLEDraftExtendCudaGraphRunner(DecodeCudaGraphRunner):
         coordinator = getattr(target_model_runner, "hisparse_coordinator", None)
         if coordinator is None:
             return False
+        token_to_kv_pool = getattr(forward_batch, "token_to_kv_pool", None)
         return callable(
             getattr(
-                self.model_runner.token_to_kv_pool,
+                token_to_kv_pool,
                 "translate_loc_to_hisparse_device",
                 None,
             )
@@ -276,9 +277,10 @@ class EAGLEDraftExtendCudaGraphRunner(DecodeCudaGraphRunner):
         coordinator = getattr(target_model_runner, "hisparse_coordinator", None)
         if coordinator is None:
             return
+        token_to_kv_pool = getattr(forward_batch, "token_to_kv_pool", None)
         if not callable(
             getattr(
-                self.model_runner.token_to_kv_pool,
+                token_to_kv_pool,
                 "translate_loc_to_hisparse_device",
                 None,
             )

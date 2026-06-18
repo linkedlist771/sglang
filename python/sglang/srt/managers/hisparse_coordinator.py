@@ -609,19 +609,22 @@ class HiSparseCoordinator:
 
         device_locs = self.req_to_device_buffer[backup_req_indices, buffer_slot]
 
-        host_locs_list = []
+        start_positions = []
         for i in backup_indices:
-            req_idx = int(req_pool_indices_cpu[i])
             start_pos = (int(seq_lens_cpu[i]) - 1) // self.compress_ratio - 1
-            host_locs = self.mem_pool_host.alloc_paged_token_slots(
-                self.req_to_host_pool,
-                self.req_to_host_pool_allocated_len,
-                req_idx,
-                start_pos,
-                1,
+            start_positions.append(start_pos)
+        host_locs = self._alloc_host_token_slots(len(start_positions))
+        if host_locs is None:
+            logger.error(
+                "HiSparse: host alloc failed for %d eager backup tokens",
+                len(start_positions),
             )
-            host_locs_list.append(host_locs)
-        host_locs = torch.cat(host_locs_list)
+            raise RuntimeError("HiSparse eager host backup allocation failed")
+        host_positions = torch.tensor(
+            start_positions, dtype=torch.int64, device=self.device
+        )
+        self.req_to_host_pool[backup_req_indices, host_positions] = host_locs
+        self._mark_host_positions_allocated(backup_req_indices, host_positions)
 
         self.wait_for_pending_backup()
         schedule_stream = device_module.current_stream()
@@ -989,7 +992,7 @@ class HiSparseCoordinator:
             backup_req_indices = accepted_req_indices[needs_backup]
             backup_device_locs = accepted_device_locs[needs_backup]
 
-            host_locs = self.mem_pool_host.alloc(backup_count)
+            host_locs = self._alloc_host_token_slots(backup_count)
             if host_locs is None:
                 full_to_device_mapping[draft_cache_locs] = draft_mapping_snapshot
                 logger.error(
@@ -997,10 +1000,10 @@ class HiSparseCoordinator:
                     backup_count,
                 )
                 return
-            host_locs = host_locs.to(device=self.device)
 
             self._backup_device_locs_to_host(host_locs, backup_device_locs)
             self.req_to_host_pool[backup_req_indices, backup_positions] = host_locs
+            self._mark_host_positions_allocated(backup_req_indices, backup_positions)
             full_to_device_mapping[accepted_cache_locs[needs_backup]] = (
                 backup_device_locs
             )
@@ -1289,6 +1292,34 @@ class HiSparseCoordinator:
         if host_indices.numel() > 0:
             self.mem_pool_host.free(host_indices)
 
+    def _alloc_host_token_slots(self, num_tokens: int) -> Union[torch.Tensor, None]:
+        if num_tokens <= 0:
+            return torch.empty((0,), dtype=torch.int64, device=self.device)
+
+        page_size = self.mem_pool_host.page_size
+        alloc_size = ((num_tokens + page_size - 1) // page_size) * page_size
+        host_indices = self.mem_pool_host.alloc(alloc_size)
+        if host_indices is None:
+            return None
+
+        host_indices = host_indices.to(device=self.device)
+        if host_indices.numel() > num_tokens:
+            self._free_host_indices(host_indices[num_tokens:])
+            host_indices = host_indices[:num_tokens]
+        return host_indices
+
+    def _mark_host_positions_allocated(
+        self, req_pool_indices: torch.Tensor, token_positions: torch.Tensor
+    ) -> None:
+        page_size = self.mem_pool_host.page_size
+        req_indices_cpu = req_pool_indices.detach().cpu().tolist()
+        positions_cpu = token_positions.detach().cpu().tolist()
+        for req_idx, token_position in zip(req_indices_cpu, positions_cpu):
+            page_end = ((int(token_position) + page_size) // page_size) * page_size
+            current_len = int(self.req_to_host_pool_allocated_len[req_idx])
+            if page_end > current_len:
+                self.req_to_host_pool_allocated_len[req_idx] = page_end
+
     @staticmethod
     def _req_pool_idx(req: Req) -> int:
         req_idx = req.req_pool_idx
@@ -1372,7 +1403,7 @@ class HiSparseCoordinator:
             )
             return False
 
-        new_host_indices = self.mem_pool_host.alloc(missing_positions.numel())
+        new_host_indices = self._alloc_host_token_slots(missing_positions.numel())
         if new_host_indices is None:
             logger.warning(
                 "HiSparse cannot retract req %s: host mem pool alloc failed for "
@@ -1382,9 +1413,10 @@ class HiSparseCoordinator:
                 self.mem_pool_host.available_size(),
             )
             return False
-        new_host_indices = new_host_indices.to(device=self.device)
         self._backup_device_locs_to_host(new_host_indices, device_locs)
         self.req_to_host_pool[req.req_pool_idx, missing_positions] = new_host_indices
+        req_indices = torch.full_like(missing_positions, req.req_pool_idx)
+        self._mark_host_positions_allocated(req_indices, missing_positions)
         return True
 
     def retract_req(self, req: Req) -> bool:
