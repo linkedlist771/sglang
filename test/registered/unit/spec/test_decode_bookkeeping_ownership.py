@@ -53,8 +53,8 @@ _OWNER_SITES = {
     (_SB, "ScheduleBatch.prepare_for_extend", "extend_batch_idx"): 1,
     (_SB, "ScheduleBatch.prepare_for_extend", "kv_committed_len"): 1,
     (_SB, "ScheduleBatch.prepare_for_extend", "kv_allocated_len"): 1,
-    ("mem_cache/common.py", "alloc_for_extend", "evict"): 1,
-    ("mem_cache/common.py", "alloc_for_decode", "evict"): 1,
+    ("mem_cache/owned_kv.py", "alloc_for_extend", "evict"): 1,
+    ("mem_cache/owned_kv.py", "alloc_for_decode", "evict"): 1,
     # spec v2: pre-claim in the scheduler-driven mixin, settle in resolve
     (*_MIXIN, "decode_batch_idx"): 1,
     (*_MIXIN, "evict"): 1,
