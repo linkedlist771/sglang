@@ -1226,10 +1226,10 @@ class UnifiedRadixCacheSuite:
             MatchPrefixParams(key=RadixKey(array("q", seq)), cow_mamba=True, req=req2)
         )
         self.assertEqual(len(m.device_indices), len(seq))
-        # COW match is a pure query: it reports the source index but does not
-        # allocate an owned destination slot nor touch the Req.
-        self.assertIsNone(req2.mamba_pool_idx)
-
+        # COW match is a pure query: it reports the matched source index via
+        # MatchResult.mamba_cow_src and does not write the Req. The orchestrator
+        # records the COW and the copy is deferred to the forward stream.
+        self.assertIsNone(req2.mamba_cow_src_index)
         src_value = m.last_device_node.component_data[ComponentType.MAMBA].value
         self.assertIsNotNone(m.mamba_cow_src)
         self.assertTrue(torch.equal(m.mamba_cow_src, src_value))
