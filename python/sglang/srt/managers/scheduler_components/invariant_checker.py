@@ -178,7 +178,7 @@ class SchedulerInvariantChecker:
         swa_uncached = 0
         for batch in batches:
             for req in batch.reqs:
-                if req.req_pool_idx is None:
+                if req.kv is None:
                     continue
 
                 allocated_len = req.kv_allocated_len
