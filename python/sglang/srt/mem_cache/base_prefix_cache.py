@@ -289,6 +289,11 @@ class MatchResult(NamedTuple):
         mamba_branching_seqlen: The mamba radix cache branching point, which is the longest
                                 page-aligned position that could've been cache hit if there
                                 exists a mamba state.
+        mamba_cow_src: The matched mamba pool index (copy-on-write source) the
+                                caller may copy from. Pure query result: the cache
+                                neither allocates a destination slot nor writes the
+                                Req. The orchestrator allocates the destination in
+                                the owned-KV alloc phase and records the COW.
     """
 
     device_indices: torch.Tensor
@@ -300,6 +305,7 @@ class MatchResult(NamedTuple):
     mamba_host_hit_length: int = 0
     mamba_branching_seqlen: Optional[int] = None
     cache_protected_len: Optional[int] = None
+    mamba_cow_src: Optional[torch.Tensor] = None
 
 
 def zero_match_result(tree_cache, match_result: MatchResult) -> MatchResult:

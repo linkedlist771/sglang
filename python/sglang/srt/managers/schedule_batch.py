@@ -1291,6 +1291,12 @@ class Req(ReqDllmMixin):
                 and self.mamba is not None
             ):
                 self.mamba.mamba_branching_seqlen = match_result.mamba_branching_seqlen
+            # match is a pure query: it only reports the COW source index. The
+            # owned-mamba destination slot is allocated later in the owned-KV
+            # alloc phase (HybridReqToTokenPool.alloc), where the matched node is
+            # already protected by the standard prefix lock.
+            if cow_mamba:
+                self.mamba_cow_src_index = match_result.mamba_cow_src
             if match_result.cache_protected_len is not None:
                 self.cache_protected_len = match_result.cache_protected_len
             else:

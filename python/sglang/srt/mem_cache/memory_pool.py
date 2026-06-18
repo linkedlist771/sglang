@@ -663,7 +663,9 @@ class HybridReqToTokenPool(ReqToTokenPool):
                     )
                 else:
                     req.mamba.mamba_pool_idx = mid[0]
-                req.mamba_needs_clear = True
+                # A fresh owned slot needs zeroing on the forward stream unless a
+                # COW source was matched, in which case the source is copied in.
+                req.mamba_needs_clear = req.mamba_cow_src_index is None
             mamba_indices.append(req.mamba_pool_idx)
             if self.enable_mamba_extra_buffer:
                 if req.mamba_ping_pong_track_buffer is None:

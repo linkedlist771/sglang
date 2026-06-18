@@ -1030,7 +1030,6 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
     ) -> MatchResult:
         """Post-process the matched result."""
         cow_mamba = params.cow_mamba
-        req = params.req
 
         # update time for matched nodes, and make nodes closer to root to be least recently used
         # this allows mamba to evict nodes closer to root first
@@ -1059,30 +1058,14 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
         else:
             mamba_branching_seqlen = None
 
-        # Defer COW to forward stream: record source index, allocate destination
-        if cow_mamba and last_node.mamba_value is not None:
-            from sglang.srt.managers.schedule_batch import ReqMambaInfo
-
-            if req.mamba is None or req.mamba.mamba_pool_idx is None:
-                dst_index = self.req_to_token_pool.mamba_allocator.alloc(1)
-                if dst_index is None:
-                    self.inc_lock_ref(last_node)
-                    self.evict(EvictParams(num_tokens=0, mamba_num=1))
-                    dst_index = self.req_to_token_pool.mamba_allocator.alloc(1)
-                    self.dec_lock_ref(last_node)
-                    assert dst_index is not None, "Can not alloc mamba cache"
-                if req.mamba is None:
-                    req.mamba = ReqMambaInfo(
-                        mamba_pool_idx=dst_index[0],
-                        mamba_ping_pong_track_buffer=None,
-                        mamba_next_track_idx=None,
-                        mamba_last_track_seqlen=None,
-                        mamba_branching_seqlen=None,
-                    )
-                else:
-                    req.mamba.mamba_pool_idx = dst_index[0]
-            req.mamba_cow_src_index = last_node.mamba_value
-            req.mamba_needs_clear = False
+        # Defer COW to the owned-KV alloc phase: only report the source index so
+        # the orchestrator can allocate the destination once the matched node is
+        # protected by the standard prefix lock.
+        mamba_cow_src = (
+            last_node.mamba_value
+            if (cow_mamba and last_node.mamba_value is not None)
+            else None
+        )
 
         value = value[:best_value_len]
         if value:
@@ -1096,6 +1079,7 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
             last_host_node=last_node,
             best_match_node=last_node,
             mamba_branching_seqlen=mamba_branching_seqlen,
+            mamba_cow_src=mamba_cow_src,
         )
 
     def _split_node(self, key: RadixKey, child: TreeNode, split_len: int) -> TreeNode:

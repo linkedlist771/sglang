@@ -133,6 +133,11 @@ def match_prefix_for_req(
     )
     if match_result.mamba_branching_seqlen is not None and req.mamba is not None:
         req.mamba.mamba_branching_seqlen = match_result.mamba_branching_seqlen
+    # match is a pure query: it only reports the COW source index. The owned
+    # destination slot is allocated later in the owned-KV alloc phase, where the
+    # matched node is already protected by the standard prefix lock.
+    if cow_mamba:
+        req.mamba_cow_src_index = match_result.mamba_cow_src
     if match_result.cache_protected_len is not None:
         req.cache_protected_len = match_result.cache_protected_len
     return match_result
