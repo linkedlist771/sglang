@@ -2482,7 +2482,7 @@ class Scheduler(
                 batch.spec_info.merge_batch(req.hisparse_spec_info)
                 req.hisparse_spec_info = None
 
-            if batch.is_spec_v2:
+            if not batch.spec_algorithm.is_none():
                 if batch.spec_info.new_seq_lens is None:
                     raise RuntimeError(
                         "HiSparse spec-v2 decode batch is missing new_seq_lens for draft state rebuild."
@@ -3225,7 +3225,7 @@ class Scheduler(
                 self.update_cache_from_scheduler(batch, batch_result)
                 if (
                     self.enable_hisparse
-                    and batch.is_spec_v2
+                    and not batch.spec_algorithm.is_none()
                     and batch_result.next_draft_input is not None
                 ):
                     batch.spec_info = batch_result.next_draft_input

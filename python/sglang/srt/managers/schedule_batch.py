@@ -2443,17 +2443,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         ):
             return 0
 
-        if self.is_spec_v2:
-            max_accepted_tokens = get_alloc_len_per_decode() + 1
-        else:
-            server_args = get_global_server_args()
-            max_accepted_tokens = (
-                max(
-                    server_args.speculative_num_steps or 0,
-                    server_args.speculative_num_draft_tokens or 0,
-                )
-                + 1
-            )
+        max_accepted_tokens = get_alloc_len_per_decode() + 1
         return max_accepted_tokens * len(requests)
 
     def _new_tokens_required_next_decode_spec_v2(self, requests, page_size):

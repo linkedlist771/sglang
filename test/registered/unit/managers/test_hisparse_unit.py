@@ -102,7 +102,6 @@ def test_schedule_batch_hisparse_spec_v2_host_budget_uses_current_alloc_helper(
     )
 
     batch = ScheduleBatch.__new__(ScheduleBatch)
-    batch.is_spec_v2 = True
     batch.spec_algorithm = SimpleNamespace(is_none=lambda: False)
     batch.hisparse_coordinator = SimpleNamespace(
         supports_hisparse_draft_slots=lambda: True
