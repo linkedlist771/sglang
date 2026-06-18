@@ -7880,9 +7880,9 @@ class ServerArgs:
         validate_hisparse(self)
 
         if self.enable_hisparse and self.speculative_algorithm is not None:
-            from sglang.srt.configs.model_config import is_deepseek_nsa
+            from sglang.srt.configs.model_config import is_deepseek_dsa
 
-            if is_deepseek_nsa(self.get_model_config().hf_config):
+            if is_deepseek_dsa(self.get_model_config().hf_config):
                 from sglang.srt.mem_cache.sparsity import parse_hisparse_config
 
                 hisparse_cfg = parse_hisparse_config(self)
