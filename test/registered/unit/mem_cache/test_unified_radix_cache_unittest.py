@@ -1217,7 +1217,6 @@ class UnifiedRadixCacheSuite:
         if not self.cfg.has_mamba:
             self.skipTest("requires Mamba component")
         tree, allocator, req_to_token_pool = build_fixture(self.cfg)
-        mamba_pool = req_to_token_pool.mamba_pool
 
         seq = self._make_seq(1, 2)
         self._insert(tree, allocator, req_to_token_pool, seq)
@@ -1227,15 +1226,13 @@ class UnifiedRadixCacheSuite:
             MatchPrefixParams(key=RadixKey(array("q", seq)), cow_mamba=True, req=req2)
         )
         self.assertEqual(len(m.device_indices), len(seq))
-        self.assertIsNotNone(req2.mamba_pool_idx)
+        # COW match is a pure query: it reports the source index but does not
+        # allocate an owned destination slot nor touch the Req.
+        self.assertIsNone(req2.mamba_pool_idx)
 
         src_value = m.last_device_node.component_data[ComponentType.MAMBA].value
-        self.assertTrue(
-            torch.all(
-                mamba_pool.mamba_cache.conv[0][:, req2.mamba_pool_idx]
-                == mamba_pool.mamba_cache.conv[0][:, src_value]
-            )
-        )
+        self.assertIsNotNone(m.mamba_cow_src)
+        self.assertTrue(torch.equal(m.mamba_cow_src, src_value))
         tree.sanity_check()
 
     def test_swa_insert_and_match(self):
