@@ -3783,7 +3783,9 @@ class Scheduler(
                     logger.debug(f"Abort pending bootstrap request. {req.rid=}")
                     if self.enable_hicache_storage:
                         self.tree_cache.release_aborted_request(req.rid)
-                    self.send_to_tokenizer.send_output(AbortReq(rid=req.rid), req)
+                    self.ipc_channels.send_to_tokenizer.send_output(
+                        AbortReq(rid=req.rid), req
+                    )
                 else:
                     remaining_pending.append(req)
             self.disagg_prefill_bootstrap_queue.pending_queue = remaining_pending
@@ -3799,7 +3801,9 @@ class Scheduler(
                         req.disagg_kv_sender.clear()
                     if self.enable_hicache_storage:
                         self.tree_cache.release_aborted_request(req.rid)
-                    self.send_to_tokenizer.send_output(AbortReq(rid=req.rid), req)
+                    self.ipc_channels.send_to_tokenizer.send_output(
+                        AbortReq(rid=req.rid), req
+                    )
                 else:
                     remaining_bootstrap.append(req)
             self.disagg_prefill_bootstrap_queue.queue = remaining_bootstrap
@@ -3817,7 +3821,9 @@ class Scheduler(
                     release_req_to_metadata_buffer(
                         req, self.req_to_metadata_buffer_idx_allocator
                     )
-                    self.send_to_tokenizer.send_output(AbortReq(rid=req.rid), req)
+                    self.ipc_channels.send_to_tokenizer.send_output(
+                        AbortReq(rid=req.rid), req
+                    )
                 else:
                     remaining_inflight.append(req)
             self.disagg_prefill_inflight_queue = remaining_inflight
@@ -3833,7 +3839,7 @@ class Scheduler(
                     if hasattr(decode_req.kv_receiver, "clear"):
                         decode_req.kv_receiver.clear()
                     aborted_prealloc_rids.add(decode_req.req.rid)
-                    self.send_to_tokenizer.send_output(
+                    self.ipc_channels.send_to_tokenizer.send_output(
                         AbortReq(rid=decode_req.req.rid), decode_req.req
                     )
                 else:
@@ -3873,7 +3879,7 @@ class Scheduler(
                     if self.enable_hisparse:
                         self.hisparse_coordinator.request_finished(decode_req.req)
                     release_kv_cache(decode_req.req, self.tree_cache, is_insert=False)
-                    self.send_to_tokenizer.send_output(
+                    self.ipc_channels.send_to_tokenizer.send_output(
                         AbortReq(rid=decode_req.req.rid), decode_req.req
                     )
                 else:
