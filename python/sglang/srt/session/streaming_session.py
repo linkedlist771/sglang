@@ -74,8 +74,8 @@ class SessionSlot:
             self.cache = copy.copy(req.cache)
             req.cache = None
 
-        # Leave the slot's default (empty) mamba in place when the req holds no
-        # mamba slot, so slot.mamba stays non-None for the slot-side readers.
+        # Copy mamba only when the req holds a mamba slot; otherwise leave the
+        # slot's mamba as-is (None for a non-mamba session).
         if req.mamba is not None:
             self.mamba = copy.copy(req.mamba)
 
