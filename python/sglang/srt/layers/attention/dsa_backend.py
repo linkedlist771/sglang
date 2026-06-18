@@ -1514,7 +1514,7 @@ class DeepseekSparseAttnBackend(
                     token_position_space="full",
                     num_steps=num_steps,
                 ).view(num_reqs * num_steps, -1)
-            elif forward_batch.forward_mode.is_draft_extend(include_v2=True):
+            elif forward_batch.forward_mode.is_draft_extend_v2():
                 assert (
                     topk_indices is not None
                 ), "topk_indices is None in DRAFT_EXTEND/DRAFT_EXTEND_V2"
@@ -2445,7 +2445,7 @@ class DeepseekSparseAttnBackend(
         ) and (
             forward_batch.forward_mode.is_decode_or_idle()
             or forward_batch.forward_mode.is_target_verify()
-            or forward_batch.forward_mode.is_draft_extend(include_v2=True)
+            or forward_batch.forward_mode.is_draft_extend_v2()
         )
         return DSAIndexerMetadata(
             attn_metadata=self.forward_metadata,
