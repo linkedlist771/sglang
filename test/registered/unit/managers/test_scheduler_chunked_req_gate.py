@@ -12,7 +12,7 @@ from sglang.test.test_utils import CustomTestCase, maybe_stub_sgl_kernel
 
 maybe_stub_sgl_kernel()
 
-from sglang.srt.managers.schedule_batch import Req
+from sglang.srt.managers.schedule_batch import Req, ReqCacheInfo
 from sglang.srt.managers.scheduler import Scheduler
 from sglang.srt.mem_cache.chunk_cache import ChunkCache
 
@@ -38,7 +38,14 @@ def _make_req(
     req.extend_input_len = extend_input_len
     req.inflight_middle_chunks = 0
     req.host_hit_length = 0
-    req.cache_protected_len = 0
+    req.kv = None
+    req.mamba = None
+    req.cache = ReqCacheInfo(
+        cache_protected_len=0,
+        last_node=None,
+        swa_uuid_for_lock=None,
+        swa_prefix_lock_released=False,
+    )
     req.skip_radix_cache_insert = False
     req.last_node = None
     req.swa_uuid_for_lock = None
@@ -47,7 +54,6 @@ def _make_req(
     req.logprob_start_len = -1
     req.positional_embed_overrides = None
     req.extra_key = None
-    req.mamba_pool_idx = None
     req.sampling_params = SimpleNamespace(max_new_tokens=128, ignore_eos=False)
     return req
 
