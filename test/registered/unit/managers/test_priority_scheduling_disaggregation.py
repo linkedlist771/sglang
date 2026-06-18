@@ -89,6 +89,7 @@ class TestDecodePreallocQueuePriority(unittest.TestCase):
             return_logprob=False,
             sampling_params=SimpleNamespace(max_new_tokens=8),
             cache_protected_len=0,
+            cache=None,
             time_stats=MagicMock(),
         )
         return SimpleNamespace(
