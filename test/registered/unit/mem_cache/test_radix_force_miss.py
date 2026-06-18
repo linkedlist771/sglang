@@ -38,7 +38,7 @@ class _StubReq:
         self.host_hit_length = None
         self.num_matched_prefix_tokens = 0
         self.mamba_branching_seqlen = None
-        self.cache_protected_len = None
+        self.cache = None
 
     def _compute_max_prefix_len(self, input_len):
         return max(input_len - 1, 0)
