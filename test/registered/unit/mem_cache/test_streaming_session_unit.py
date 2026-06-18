@@ -1,8 +1,14 @@
 from types import SimpleNamespace
+from typing import Optional
 
 import torch
 
-from sglang.srt.managers.schedule_batch import FINISH_ABORT
+from sglang.srt.managers.schedule_batch import (
+    FINISH_ABORT,
+    ReqCacheInfo,
+    ReqKvInfo,
+    ReqMambaInfo,
+)
 from sglang.srt.mem_cache.base_prefix_cache import MatchResult
 from sglang.srt.session.streaming_session import SessionSlot, StreamingSession
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -55,38 +61,39 @@ class _FakeReq:
             abort_req=lambda: None,
             _inflight=False,
         )
-        self.req_pool_idx = req_pool_idx
-        self.kv_committed_len = committed
-        self.kv_allocated_len = allocated
-        self.kv_committed_freed = False
-        self.kv_overallocated_freed = False
+        self.req_pool_idx: int = req_pool_idx
+        self.kv_committed_len: int = committed
+        self.kv: ReqKvInfo = ReqKvInfo(kv_allocated_len=allocated, swa_evicted_seqlen=0)
+        self.cache: ReqCacheInfo = ReqCacheInfo(
+            cache_protected_len=0,
+            last_node=None,
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
+        self.mamba: Optional[ReqMambaInfo] = None
         self.origin_input_ids = list(range(committed))
         self.output_ids = []
         self.extra_key = None
-        self.swa_evicted_seqlen = 0
-        self.last_node = None
-        self.cache_protected_len = 0
         self.swa_uuid_for_lock = None
-        self.mamba_pool_idx = None
-        self.mamba_ping_pong_track_buffer = None
-        self.mamba_next_track_idx = None
-        self.mamba_last_track_seqlen = None
-        self.mamba_branching_seqlen = None
-        self.pop_overallocated_calls = 0
         self.to_finish = None
         self.finished_reason = None
         self.finished_len = None
 
-    def pop_committed_kv_cache(self):
-        assert not self.kv_committed_freed
-        self.kv_committed_freed = True
-        return self.kv_committed_len
+    @property
+    def kv_allocated_len(self) -> int:
+        return self.kv.kv_allocated_len
 
-    def pop_overallocated_kv_cache(self):
-        assert not self.kv_overallocated_freed
-        self.pop_overallocated_calls += 1
-        self.kv_overallocated_freed = True
-        return self.kv_committed_len, self.kv_allocated_len
+    @kv_allocated_len.setter
+    def kv_allocated_len(self, value: int) -> None:
+        self.kv.kv_allocated_len = value
+
+    @property
+    def swa_evicted_seqlen(self) -> int:
+        return self.kv.swa_evicted_seqlen
+
+    @swa_evicted_seqlen.setter
+    def swa_evicted_seqlen(self, value: int) -> None:
+        self.kv.swa_evicted_seqlen = value
 
 
 def test_preabort_detaches_session_and_preserves_slot():
@@ -112,8 +119,13 @@ def test_preabort_detaches_session_and_preserves_slot():
     tree_cache.slots["session-a"] = SessionSlot(
         req_pool_idx=0,
         kv_committed_len=48,
-        kv_allocated_len=48,
-        cache_protected_len=16,
+        kv=ReqKvInfo(kv_allocated_len=48, swa_evicted_seqlen=0),
+        cache=ReqCacheInfo(
+            cache_protected_len=16,
+            last_node=None,
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        ),
     )
 
     req = _FakeReq("session-a", req_pool_idx=1, committed=1, allocated=1)
@@ -132,7 +144,7 @@ def test_preabort_detaches_session_and_preserves_slot():
     slot = tree_cache.slots["session-a"]
     assert slot.req_pool_idx == 0
     assert slot.kv_committed_len == 48
-    assert slot.kv_allocated_len == 48
+    assert slot.kv.kv_allocated_len == 48
     assert len(result.device_indices) == 0
 
 
@@ -159,9 +171,9 @@ def test_first_mid_abort_nukes_ephemeral_slot():
     assert req_to_token_pool.free_slots == [0]
     assert len(allocator.freed) == 1
     assert allocator.freed[0].tolist() == list(range(20))
-    # Bookkeeping flags set.
-    assert req.kv_committed_freed is True
-    assert req.kv_overallocated_freed is True
+    # Resource ownership transferred to (and freed by) release_session.
+    assert req.kv is None
+    assert req.cache is None
 
 
 def test_nth_mid_abort_nukes_session_slot():
@@ -179,9 +191,13 @@ def test_nth_mid_abort_nukes_session_slot():
     tree_cache.slots["session-a"] = SessionSlot(
         req_pool_idx=0,
         kv_committed_len=50,
-        kv_allocated_len=50,
-        last_node=None,
-        cache_protected_len=0,
+        kv=ReqKvInfo(kv_allocated_len=50, swa_evicted_seqlen=0),
+        cache=ReqCacheInfo(
+            cache_protected_len=0,
+            last_node=None,
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        ),
     )
 
     # Mid-processing abort: req has the SESSION slot's pool_idx (restore_to_req ran).
@@ -198,9 +214,9 @@ def test_nth_mid_abort_nukes_session_slot():
     # Pool slot returned.
     assert req_to_token_pool.free_slots == [0]
     assert req.req_pool_idx is None
-    # Bookkeeping flags set.
-    assert req.kv_committed_freed is True
-    assert req.kv_overallocated_freed is True
+    # Resource ownership transferred to (and freed by) release_session.
+    assert req.kv is None
+    assert req.cache is None
 
 
 # Shrink tests removed: streaming sessions are append-only after the
