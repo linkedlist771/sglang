@@ -83,6 +83,34 @@ def test_next_decode_host_budget_counts_only_new_allocations():
     )
 
 
+def test_schedule_batch_hisparse_spec_v2_host_budget_uses_current_alloc_helper(
+    monkeypatch,
+):
+    from sglang.srt.managers.schedule_batch import ScheduleBatch
+    from sglang.srt.mem_cache import common as mem_cache_common
+
+    monkeypatch.setattr(
+        mem_cache_common,
+        "get_global_server_args",
+        lambda: SimpleNamespace(
+            speculative_algorithm="EAGLE",
+            speculative_num_steps=3,
+            speculative_eagle_topk=1,
+            max_speculative_num_draft_tokens=4,
+            page_size=64,
+        ),
+    )
+
+    batch = ScheduleBatch.__new__(ScheduleBatch)
+    batch.is_spec_v2 = True
+    batch.spec_algorithm = SimpleNamespace(is_none=lambda: False)
+    batch.hisparse_coordinator = SimpleNamespace(
+        supports_hisparse_draft_slots=lambda: True
+    )
+
+    assert batch._host_tokens_required_next_decode_spec([object(), object()]) == 10
+
+
 class TestHiSparseUnit(unittest.TestCase):
     """Test class that builds a minimal HiSparse component stack."""
 

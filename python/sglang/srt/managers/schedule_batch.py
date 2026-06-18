@@ -84,6 +84,7 @@ from sglang.srt.mem_cache.common import (
     alloc_for_extend,
     evict_from_tree_cache,
     free_swa_out_of_window_slots,
+    get_alloc_len_per_decode,
     get_alloc_reserve_per_decode,
     release_kv_cache,
 )
@@ -2442,12 +2443,10 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         ):
             return 0
 
-        server_args = get_global_server_args()
         if self.is_spec_v2:
-            from sglang.srt.managers.utils import get_alloc_len_per_decode
-
             max_accepted_tokens = get_alloc_len_per_decode() + 1
         else:
+            server_args = get_global_server_args()
             max_accepted_tokens = (
                 max(
                     server_args.speculative_num_steps or 0,
