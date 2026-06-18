@@ -20,7 +20,7 @@ from sglang.srt.disaggregation.kv_events import (
 )
 from sglang.srt.environ import envs
 from sglang.srt.layers.attention.fla.chunk_delta_h import CHUNK_SIZE as FLA_CHUNK_SIZE
-from sglang.srt.managers.schedule_batch import Req
+from sglang.srt.managers.schedule_batch import Req, ReqCacheInfo
 from sglang.srt.mem_cache.allocator import TokenToKVPoolAllocator
 from sglang.srt.mem_cache.allocator.swa import SWATokenToKVPoolAllocator
 from sglang.srt.mem_cache.base_prefix_cache import (
@@ -645,6 +645,12 @@ class UnifiedRadixCacheSuite:
         )
         self._rid += 1
         req_to_token_pool.alloc([req])
+        req.cache = ReqCacheInfo(
+            cache_protected_len=0,
+            last_node=None,
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
         return req
 
     def _apply_match_to_req(self, req, match):
@@ -947,7 +953,7 @@ class UnifiedRadixCacheSuite:
         try:
             avail_before = allocator.available_size()
             self._finish(tree, req, is_insert=True)
-            start_p, end_p = req.pop_overallocated_kv_cache()
+            start_p, end_p = req.effective_kv_committed_len(), req.kv_allocated_len
         finally:
             get_global_server_args().strip_thinking_cache = False
         if ps > 1:

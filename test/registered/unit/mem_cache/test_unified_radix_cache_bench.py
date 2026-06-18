@@ -242,7 +242,7 @@ def create_bench_cache(
     _rid = [0]
 
     def make_req():
-        from sglang.srt.managers.schedule_batch import Req
+        from sglang.srt.managers.schedule_batch import Req, ReqCacheInfo
         from sglang.srt.sampling.sampling_params import SamplingParams
 
         req = Req(
@@ -253,6 +253,12 @@ def create_bench_cache(
         )
         _rid[0] += 1
         req_to_token_pool.alloc([req])
+        req.cache = ReqCacheInfo(
+            cache_protected_len=0,
+            last_node=None,
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
         return req
 
     return tree, allocator, req_to_token_pool, make_req
