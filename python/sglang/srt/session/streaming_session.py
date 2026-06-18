@@ -42,35 +42,6 @@ class _VirtualNode:
     pass
 
 
-def _new_cache() -> ReqCacheInfo:
-    from sglang.srt.managers.schedule_batch import ReqCacheInfo
-
-    return ReqCacheInfo(
-        cache_protected_len=0,
-        last_node=None,
-        swa_uuid_for_lock=None,
-        swa_prefix_lock_released=False,
-    )
-
-
-def _new_kv() -> ReqKvInfo:
-    from sglang.srt.managers.schedule_batch import ReqKvInfo
-
-    return ReqKvInfo(kv_allocated_len=0, swa_evicted_seqlen=0)
-
-
-def _new_mamba() -> ReqMambaInfo:
-    from sglang.srt.managers.schedule_batch import ReqMambaInfo
-
-    return ReqMambaInfo(
-        mamba_pool_idx=None,
-        mamba_ping_pong_track_buffer=None,
-        mamba_next_track_idx=None,
-        mamba_last_track_seqlen=None,
-        mamba_branching_seqlen=None,
-    )
-
-
 @dataclass
 class SessionSlot:
     """Holds KV state between streaming session turns."""
@@ -81,16 +52,17 @@ class SessionSlot:
     req_pool_idx: Optional[int] = None
     kv_committed_len: int = 0
 
-    cache: ReqCacheInfo = field(default_factory=_new_cache)
-    kv: ReqKvInfo = field(default_factory=_new_kv)
-    mamba: ReqMambaInfo = field(default_factory=_new_mamba)
+    # Resource objects, presence-tracked: None == this slot does not hold the
+    # resource. An empty slot has all three None; a holding slot always has kv
+    # and cache, and has mamba only for mamba sessions.
+    cache: Optional[ReqCacheInfo] = None
+    kv: Optional[ReqKvInfo] = None
+    mamba: Optional[ReqMambaInfo] = None
 
     @property
     def is_holding_kv(self) -> bool:
         """Whether this slot currently holds KV pool resources."""
-        # TODO: this should key off resource-object presence once opid6 makes
-        # the objects Optional; kept req_pool_idx-based to preserve behavior.
-        return self.req_pool_idx is not None
+        return self.kv is not None
 
     def save_from_req(self, req: Req, is_first: bool):
         """Save KV state from a finishing request into this slot."""
@@ -123,7 +95,9 @@ class SessionSlot:
         # Only hand the req a mamba object when the slot actually holds a mamba
         # slot; otherwise the req holds no mamba state (req.mamba stays None).
         req.mamba = (
-            copy.copy(self.mamba) if self.mamba.mamba_pool_idx is not None else None
+            copy.copy(self.mamba)
+            if self.mamba is not None and self.mamba.mamba_pool_idx is not None
+            else None
         )
 
         # NOTE: req_pool_idx and mamba_pool_idx are intentionally NOT cleared
@@ -227,7 +201,7 @@ class StreamingSession(BasePrefixCache):
         if not _is_streaming(req):
             return None
         slot = self.slots.get(req.session.session_id)
-        if slot is None or slot.req_pool_idx is None:
+        if slot is None or slot.kv is None:
             return None
         if req.to_finish is not None:
             req.session.abort_req()
@@ -319,9 +293,7 @@ class StreamingSession(BasePrefixCache):
                     req_pool_idx=req.req_pool_idx,
                     kv=copy.copy(req.kv),
                     cache=copy.copy(req.cache),
-                    mamba=(
-                        copy.copy(req.mamba) if req.mamba is not None else _new_mamba()
-                    ),
+                    mamba=copy.copy(req.mamba) if req.mamba is not None else None,
                 )
                 self.slots[session_id] = slot
                 # Slot now owns these resources — drop the req's refs so
@@ -414,8 +386,14 @@ class StreamingSession(BasePrefixCache):
         slot = self.slots.pop(session_id, None)
         if slot is None:
             return
-        protected_len = slot.cache.cache_protected_len
-        lock_node = slot.cache.last_node
+        if slot.cache is not None:
+            protected_len = slot.cache.cache_protected_len
+            lock_node = slot.cache.last_node
+            swa_uuid_for_lock = slot.cache.swa_uuid_for_lock
+        else:
+            protected_len = 0
+            lock_node = None
+            swa_uuid_for_lock = None
         tokens_freed = (
             max(0, slot.kv.kv_allocated_len - protected_len)
             if slot.is_holding_kv
@@ -426,10 +404,10 @@ class StreamingSession(BasePrefixCache):
         )
 
         if lock_node is not None:
-            if slot.cache.swa_uuid_for_lock is not None:
+            if swa_uuid_for_lock is not None:
                 self.inner.dec_lock_ref(
                     lock_node,
-                    DecLockRefParams(swa_uuid_for_lock=slot.cache.swa_uuid_for_lock),
+                    DecLockRefParams(swa_uuid_for_lock=swa_uuid_for_lock),
                 )
             else:
                 self.inner.dec_lock_ref(lock_node)
@@ -504,7 +482,7 @@ class StreamingSession(BasePrefixCache):
             in_batch = (
                 active_pool_idxs is not None and slot.req_pool_idx in active_pool_idxs
             )
-            if in_batch:
+            if in_batch or slot.mamba is None:
                 continue
             if slot.mamba.mamba_pool_idx is not None:
                 total += slot.mamba.mamba_pool_idx.numel()
@@ -515,7 +493,7 @@ class StreamingSession(BasePrefixCache):
     def _free_slot_mamba(self, slot: SessionSlot) -> None:
         """Return a session slot's mamba pool state to the allocator."""
         mamba_allocator = getattr(self.req_to_token_pool, "mamba_allocator", None)
-        if mamba_allocator is None:
+        if mamba_allocator is None or slot.mamba is None:
             return
         if slot.mamba.mamba_pool_idx is not None:
             mamba_allocator.free(slot.mamba.mamba_pool_idx.unsqueeze(0))
