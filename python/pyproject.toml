@@ -140,6 +140,7 @@ test = [
   "addict",
   "bitsandbytes",
   "expecttest",
+  "import-linter>=2.0",
   "jsonlines",
   "lm-eval[api]>=0.4.9.2",
   "matplotlib",
