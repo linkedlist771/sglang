@@ -41,12 +41,12 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     EvictParams,
     EvictResult,
     FinishResult,
-    UnfinishResult,
     IncLockRefResult,
     InsertParams,
     InsertResult,
     MatchPrefixParams,
     MatchResult,
+    UnfinishResult,
 )
 from sglang.srt.mem_cache.events import KVCacheEventMixin
 from sglang.srt.mem_cache.memory_pool import HybridReqToTokenPool
@@ -55,7 +55,6 @@ from sglang.srt.mem_cache.utils import split_node_hash_value
 from sglang.srt.server_args import get_global_server_args
 
 if TYPE_CHECKING:
-    from sglang.srt.managers.schedule_batch import Req
     from sglang.srt.mem_cache.cache_init_params import CacheInitParams
 
 import logging
@@ -625,7 +624,9 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
             kv_indices: torch.Tensor,
         ) -> UnfinishResult:
             # `req.prefix_indices` will be used in `PrefillAdder::add_chunked_req` later
-            return UnfinishResult(prefix_indices=kv_indices.to(dtype=torch.int64, copy=True))
+            return UnfinishResult(
+                prefix_indices=kv_indices.to(dtype=torch.int64, copy=True)
+            )
 
         token_ids = params.token_ids
         cache_len = (
@@ -634,9 +635,7 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
             else len(token_ids)
         )
         if self.disable or cache_len is None:
-            return _skip_cache_unfinished_req(
-                params.kv_indices[: len(token_ids)]
-            )
+            return _skip_cache_unfinished_req(params.kv_indices[: len(token_ids)])
 
         kv_indices_orig = params.kv_indices[: len(token_ids)]
         # kv_indices is the kv indices to be cached

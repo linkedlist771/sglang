@@ -20,16 +20,15 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     EvictParams,
     EvictResult,
     FinishResult,
-    UnfinishResult,
     IncLockRefResult,
     InsertParams,
     InsertResult,
     MatchPrefixParams,
     MatchResult,
+    UnfinishResult,
 )
 
 if TYPE_CHECKING:
-    from sglang.srt.managers.schedule_batch import Req
     from sglang.srt.mem_cache.cache_init_params import CacheInitParams
 
 

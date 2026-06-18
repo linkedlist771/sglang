@@ -16,11 +16,11 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     EvictParams,
     EvictResult,
     FinishResult,
-    UnfinishResult,
     IncLockRefResult,
     InitLoadBackParams,
     MatchPrefixParams,
     MatchResult,
+    UnfinishResult,
 )
 from sglang.srt.utils.common import ceil_align
 

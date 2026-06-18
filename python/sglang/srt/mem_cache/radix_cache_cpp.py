@@ -15,10 +15,10 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     EvictParams,
     EvictResult,
     FinishResult,
-    UnfinishResult,
     IncLockRefResult,
     MatchPrefixParams,
     MatchResult,
+    UnfinishResult,
 )
 from sglang.srt.mem_cache.cpp_radix_tree.radix_tree import (
     IOHandle,
@@ -28,7 +28,6 @@ from sglang.srt.mem_cache.cpp_radix_tree.radix_tree import (
 from sglang.srt.mem_cache.radix_cache import RadixKey
 
 if TYPE_CHECKING:
-    from sglang.srt.managers.schedule_batch import Req
     from sglang.srt.mem_cache.cache_init_params import CacheInitParams
     from sglang.srt.server_args import ServerArgs
 
@@ -254,7 +253,9 @@ class RadixCacheCpp(BasePrefixCache):
         # NOTE: there might be unaligned tail, so we may need to append it
         assert len(new_indices) <= prefill_len < len(new_indices) + self.page_size
         if self.page_size != 1 and len(new_indices) < prefill_len:
-            new_prefix_indices = torch.cat([new_indices, kv_indices[len(new_indices) :]])
+            new_prefix_indices = torch.cat(
+                [new_indices, kv_indices[len(new_indices) :]]
+            )
         else:
             new_prefix_indices = new_indices
 

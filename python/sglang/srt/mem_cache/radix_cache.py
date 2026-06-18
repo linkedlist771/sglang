@@ -43,18 +43,18 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     EvictParams,
     EvictResult,
     FinishResult,
-    UnfinishResult,
     IncLockRefResult,
     InsertParams,
     InsertResult,
     MatchPrefixParams,
     MatchResult,
+    UnfinishResult,
 )
 from sglang.srt.mem_cache.events import KVCacheEventMixin
 from sglang.srt.mem_cache.utils import get_eviction_strategy, split_node_hash_value
 
 if TYPE_CHECKING:
-    from sglang.srt.managers.schedule_batch import Req
+    pass
 
 
 class RadixKey:
@@ -536,7 +536,9 @@ class RadixCache(KVCacheEventMixin, BasePrefixCache):
         # - page_size != 1: there is a partial page at the end, keep the full kv_indices
         # - eagle case: bigram keys will only cache len - 1 kv indices
         if len(new_indices) < len(kv_indices):
-            new_prefix_indices = torch.cat([new_indices, kv_indices[len(new_indices) :]])
+            new_prefix_indices = torch.cat(
+                [new_indices, kv_indices[len(new_indices) :]]
+            )
         else:
             new_prefix_indices = new_indices
 

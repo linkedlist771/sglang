@@ -23,13 +23,13 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     EvictParams,
     EvictResult,
     FinishResult,
-    UnfinishResult,
     IncLockRefResult,
     InitLoadBackParams,
     InsertParams,
     InsertResult,
     MatchPrefixParams,
     MatchResult,
+    UnfinishResult,
 )
 from sglang.srt.mem_cache.events import KVCacheEventMixin
 from sglang.srt.mem_cache.hicache_storage import (
