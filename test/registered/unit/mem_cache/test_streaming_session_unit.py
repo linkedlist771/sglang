@@ -9,7 +9,7 @@ from sglang.srt.managers.schedule_batch import (
     ReqKvInfo,
     ReqMambaInfo,
 )
-from sglang.srt.mem_cache.base_prefix_cache import MatchResult
+from sglang.srt.mem_cache.base_prefix_cache import CacheFinishParams, MatchResult
 from sglang.srt.session.streaming_session import SessionSlot, StreamingSession
 from sglang.test.ci.ci_register import register_cpu_ci
 
@@ -162,7 +162,7 @@ def test_first_mid_abort_nukes_ephemeral_slot():
     req = _FakeReq("session-a", req_pool_idx=0, committed=0, allocated=20)
     req.finished_reason = FINISH_ABORT("input too long")
 
-    tree_cache.cache_finished_req(req)
+    tree_cache.cache_finished_req(CacheFinishParams(req=req))
 
     # Slot must NOT be created.
     assert "session-a" not in tree_cache.slots
@@ -204,7 +204,7 @@ def test_nth_mid_abort_nukes_session_slot():
     req = _FakeReq("session-a", req_pool_idx=0, committed=60, allocated=65)
     req.finished_reason = FINISH_ABORT("client disconnected")
 
-    tree_cache.cache_finished_req(req)
+    tree_cache.cache_finished_req(CacheFinishParams(req=req))
 
     # Slot wiped — deleted from slots dict.
     assert "session-a" not in tree_cache.slots

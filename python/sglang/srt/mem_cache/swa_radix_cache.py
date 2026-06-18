@@ -31,10 +31,12 @@ from sglang.srt.environ import envs
 from sglang.srt.mem_cache.allocator.swa import SWATokenToKVPoolAllocator
 from sglang.srt.mem_cache.base_prefix_cache import (
     BasePrefixCache,
+    CacheFinishParams,
     DecLockRefParams,
     DecLockRefResult,
     EvictParams,
     EvictResult,
+    FinishResult,
     IncLockRefResult,
     InsertParams,
     InsertResult,
@@ -435,38 +437,32 @@ class SWARadixCache(KVCacheEventMixin, BasePrefixCache):
         )
         return InsertResult(prefix_len=prefix_len)
 
-    def cache_finished_req(
-        self, req: Req, is_insert: bool = True, *, kv_committed_len: int
-    ) -> None:
+    def cache_finished_req(self, params: CacheFinishParams) -> Optional[FinishResult]:
         """Cache request when it finishes."""
         if self.disable:
-            kv_indices = self.req_to_token_pool.req_to_token[
-                req.req_pool_idx, :kv_committed_len
-            ]
+            kv_indices = params.kv_indices[: params.kv_committed_len]
             self.token_to_kv_pool_allocator.free(kv_indices)
-            return
+            return None
 
-        token_ids = (req.origin_input_ids + req.output_ids)[:kv_committed_len]
-        kv_indices = self.req_to_token_pool.req_to_token[
-            req.req_pool_idx, :kv_committed_len
-        ]
+        token_ids = params.token_ids
+        kv_indices = params.kv_indices[: params.kv_committed_len]
 
         radix_key = RadixKey(
-            token_ids, req.extra_key, is_bigram=self.is_eagle
+            token_ids, params.extra_key, is_bigram=self.is_eagle
         ).page_aligned(self.page_size)
         page_aligned_len = len(radix_key)
         values = kv_indices[:page_aligned_len].to(dtype=torch.int64, copy=True)
-        old_prefix_len = req.cache_protected_len
+        old_prefix_len = params.prev_prefix_len
 
         # Radix Cache takes one ref in memory pool
         # Note: the insert function already frees the overlapped kv_indices
-        if is_insert:
+        if params.is_insert:
             self.insert(
                 InsertParams(
                     key=radix_key,
                     value=values,
                     prev_prefix_len=old_prefix_len,
-                    swa_evicted_seqlen=req.swa_evicted_seqlen,
+                    swa_evicted_seqlen=params.swa_evicted_seqlen,
                 )
             )
         else:
@@ -479,11 +475,11 @@ class SWARadixCache(KVCacheEventMixin, BasePrefixCache):
 
         # Remove req slot release the cache lock
         self.dec_lock_ref(
-            req.last_node,
-            DecLockRefParams(swa_uuid_for_lock=req.swa_uuid_for_lock),
-            skip_swa=req.swa_prefix_lock_released,
+            params.last_node,
+            DecLockRefParams(swa_uuid_for_lock=params.swa_uuid_for_lock),
+            skip_swa=params.swa_prefix_lock_released,
         )
-        req.swa_prefix_lock_released = False
+        return None
 
     def cache_unfinished_req(self, req: Req, chunked=False) -> None:
         """Cache request when it is unfinished."""

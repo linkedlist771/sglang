@@ -30,6 +30,7 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     MatchPrefixParams,
 )
 from sglang.srt.mem_cache.cache_init_params import CacheInitParams
+from sglang.srt.mem_cache.common import harvest_and_finish_req
 from sglang.srt.mem_cache.mamba_radix_cache import MambaRadixCache
 from sglang.srt.mem_cache.memory_pool import HybridLinearKVPool, HybridReqToTokenPool
 from sglang.srt.mem_cache.radix_cache import RadixKey
@@ -656,7 +657,7 @@ def bench_cache_finished(
     return bench_api(
         "cache_finished",
         lambda: req_items,
-        lambda req: env.tree.cache_finished_req(req, is_insert=True),
+        lambda req: harvest_and_finish_req(req, env.tree, is_insert=True),
         len(req_items) - warmup,
         env.avg_tokens,
         warmup,

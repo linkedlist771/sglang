@@ -33,7 +33,10 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     MatchResult,
 )
 from sglang.srt.mem_cache.cache_init_params import CacheInitParams
-from sglang.srt.mem_cache.common import available_and_evictable_str
+from sglang.srt.mem_cache.common import (
+    available_and_evictable_str,
+    harvest_and_finish_req,
+)
 from sglang.srt.mem_cache.hicache_storage import PoolName
 from sglang.srt.mem_cache.memory_pool import (
     HybridLinearKVPool,
@@ -677,6 +680,11 @@ class UnifiedRadixCacheSuite:
         allocator.full_to_swa_index_mapping[full_indices] = swa_indices
         return full_indices[:need_size]
 
+    def _finish(self, tree, req, is_insert=True):
+        """Harvest finish params off a real Req and drive cache_finished_req
+        through the orchestrator helper (return-not-mutate frees included)."""
+        harvest_and_finish_req(req, tree, is_insert=is_insert)
+
     def _insert(self, tree, allocator, req_to_token_pool, tokens, priority=0):
         """Insert tokens, attaching mamba data when the config has mamba."""
         key = RadixKey(array("q", tokens))
@@ -901,7 +909,7 @@ class UnifiedRadixCacheSuite:
         if self.cfg.has_mamba:
             req.mamba_last_track_seqlen = kv_len
 
-        tree.cache_finished_req(req, is_insert=True)
+        self._finish(tree, req, is_insert=True)
 
         all_ids = input_ids + output_ids
         aligned_len = (len(all_ids) // ps) * ps
@@ -938,7 +946,7 @@ class UnifiedRadixCacheSuite:
         get_global_server_args().strip_thinking_cache = True
         try:
             avail_before = allocator.available_size()
-            tree.cache_finished_req(req, is_insert=True)
+            self._finish(tree, req, is_insert=True)
             start_p, end_p = req.pop_overallocated_kv_cache()
         finally:
             get_global_server_args().strip_thinking_cache = False
@@ -979,7 +987,7 @@ class UnifiedRadixCacheSuite:
         req.fill_len = len(req.full_untruncated_fill_ids)
 
         avail_before = allocator.available_size()
-        tree.cache_finished_req(req, is_insert=False)
+        self._finish(tree, req, is_insert=False)
 
         self.assertEqual(allocator.available_size(), avail_before + kv_len)
         m = tree.match_prefix(MatchPrefixParams(key=RadixKey(array("q", tokens))))
@@ -1134,7 +1142,7 @@ class UnifiedRadixCacheSuite:
             req.mamba_last_track_seqlen = kv_len
 
         avail_before = allocator.available_size()
-        tree.cache_finished_req(req, is_insert=True)
+        self._finish(tree, req, is_insert=True)
 
         self.assertEqual(allocator.available_size(), avail_before + tail_extra)
         aligned = input_ids[: (len(input_ids) // ps) * ps]
