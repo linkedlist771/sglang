@@ -173,8 +173,10 @@ def harvest_and_cache_unfinished_req(
 
     # Return-not-mutate: the cache reports the refreshed prefix_indices, the new
     # cache_protected_len and the post-handover lock state; the orchestrator
-    # writes them onto the Req. StreamingSession / disabled paths short-circuit
-    # and write req.prefix_indices themselves, returning None here.
+    # writes them onto the Req. A None result means the cache fully handled the
+    # request and left the Req untouched (RadixCache disabled / first-turn
+    # streaming delegated to inner). lock_handover gates the lock-state writeback
+    # so skip / early-return paths leave last_node and the SWA lock fields alone.
     if unfinish_result is None:
         return
     if unfinish_result.prefix_indices is not None:
