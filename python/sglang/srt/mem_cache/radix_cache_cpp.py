@@ -9,11 +9,13 @@ import torch
 from sglang.srt.mem_cache.base_prefix_cache import (
     BasePrefixCache,
     CacheFinishParams,
+    CacheUnfinishParams,
     DecLockRefParams,
     DecLockRefResult,
     EvictParams,
     EvictResult,
     FinishResult,
+    UnfinishResult,
     IncLockRefResult,
     MatchPrefixParams,
     MatchResult,
@@ -209,19 +211,19 @@ class RadixCacheCpp(BasePrefixCache):
         self.dec_lock_ref(params.last_node)
         return None
 
-    def cache_unfinished_req(self, req: Req, chunked=False):
+    def cache_unfinished_req(
+        self, params: CacheUnfinishParams
+    ) -> Optional[UnfinishResult]:
         """Cache request when it is unfinished."""
-        assert req.req_pool_idx is not None
-        token_ids = req.get_fill_ids()
+        assert params.req_pool_idx is not None
+        token_ids = params.token_ids
         prefill_len = len(token_ids)  # prefill only (maybe chunked)
-        kv_indices = self.req_to_token_pool.req_to_token[
-            req.req_pool_idx, :prefill_len
-        ].to(dtype=torch.int64, copy=True)
+        kv_indices = params.kv_indices[:prefill_len].to(dtype=torch.int64, copy=True)
 
         # NOTE: our C++ implementation don't need `token_ids` and `kv_indices` to be page-aligned
         # it will automatically align them, but length of them should be equal
-        old_prefix_len = len(req.prefix_indices) // self.page_size * self.page_size
-        new_prefix_len = self._insert(RadixKey(token_ids, req.extra_key), kv_indices)
+        old_prefix_len = params.prefix_indices_len // self.page_size * self.page_size
+        new_prefix_len = self._insert(RadixKey(token_ids, params.extra_key), kv_indices)
 
         # NOTE: kv_indices[:old_prefix_len] == req.prefix_indices
         assert old_prefix_len <= new_prefix_len, "Wrong prefix indices"
@@ -229,7 +231,7 @@ class RadixCacheCpp(BasePrefixCache):
         # TODO(dark): optimize the `insert` and `match` (e.g. merge into 1 function)
         # The prefix indices need to updated to reuse the kv indices in the pool
         new_indices_vec, _, new_last_node, _ = self.tree.match_prefix(
-            RadixKey(token_ids, req.extra_key).token_ids
+            RadixKey(token_ids, params.extra_key).token_ids
         )
         new_indices = self._merge_tensor(new_indices_vec)
         assert new_prefix_len <= len(new_indices)
@@ -242,22 +244,25 @@ class RadixCacheCpp(BasePrefixCache):
             )
             reused_indices = new_indices[old_prefix_len:new_prefix_len]
             self.req_to_token_pool.req_to_token[
-                req.req_pool_idx, old_prefix_len:new_prefix_len
+                params.req_pool_idx, old_prefix_len:new_prefix_len
             ] = reused_indices
 
-        if req.last_node != new_last_node:
-            self.dec_lock_ref(req.last_node)
+        if params.last_node != new_last_node:
+            self.dec_lock_ref(params.last_node)
             self.inc_lock_ref(new_last_node)
 
         # NOTE: there might be unaligned tail, so we may need to append it
         assert len(new_indices) <= prefill_len < len(new_indices) + self.page_size
         if self.page_size != 1 and len(new_indices) < prefill_len:
-            req.prefix_indices = torch.cat(
-                [new_indices, kv_indices[len(new_indices) :]]
-            )
+            new_prefix_indices = torch.cat([new_indices, kv_indices[len(new_indices) :]])
         else:
-            req.prefix_indices = new_indices
-        req.last_node = new_last_node
+            new_prefix_indices = new_indices
+
+        return UnfinishResult(
+            prefix_indices=new_prefix_indices,
+            lock_handover=True,
+            last_node=new_last_node,
+        )
 
     def pretty_print(self):
         return self.tree.debug_print()

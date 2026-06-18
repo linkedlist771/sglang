@@ -10,6 +10,7 @@ from sglang.srt.mem_cache.allocator.swa import SWATokenToKVPoolAllocator
 from sglang.srt.mem_cache.base_prefix_cache import (
     BasePrefixCache,
     CacheFinishParams,
+    CacheUnfinishParams,
     EvictParams,
 )
 from sglang.srt.mem_cache.memory_pool import HybridReqToTokenPool, ReqToTokenPool
@@ -133,10 +134,58 @@ def maybe_cache_unfinished_req(req: Req, tree_cache: BasePrefixCache, **kwargs):
     if getattr(req, "skip_radix_cache_insert", False):
         return
 
-    evict_swa_out_of_window_for_unfinished(
-        req, tree_cache, chunked=kwargs.get("chunked", False)
+    chunked = kwargs.get("chunked", False)
+    evict_swa_out_of_window_for_unfinished(req, tree_cache, chunked=chunked)
+    harvest_and_cache_unfinished_req(req, tree_cache, chunked=chunked)
+
+
+def harvest_and_cache_unfinished_req(
+    req: Req, tree_cache: BasePrefixCache, chunked: bool = False
+) -> None:
+    # Harvest the values the cache needs off the Req so the cache no longer
+    # receives a Req. prev_prefix_len (= cache_protected_len) stays on the
+    # orchestrator side; the cache reports the refreshed prefix artifacts via
+    # UnfinishResult (return-not-mutate) and the orchestrator writes them back.
+    token_ids = req.get_fill_ids()
+    kv_indices = tree_cache.req_to_token_pool.req_to_token[
+        req.req_pool_idx, : len(token_ids)
+    ]
+    unfinish_params = CacheUnfinishParams(
+        token_ids=token_ids,
+        extra_key=req.extra_key,
+        kv_indices=kv_indices,
+        req_pool_idx=req.req_pool_idx,
+        prev_prefix_len=req.cache_protected_len if req.cache is not None else 0,
+        prefix_indices_len=len(req.prefix_indices),
+        swa_evicted_seqlen=req.kv.swa_evicted_seqlen if req.kv is not None else 0,
+        priority=getattr(req, "priority", 0) or 0,
+        chunked=chunked,
+        last_node=req.cache.last_node if req.cache is not None else None,
+        swa_uuid_for_lock=(
+            req.cache.swa_uuid_for_lock if req.cache is not None else None
+        ),
+        swa_prefix_lock_released=(
+            req.cache.swa_prefix_lock_released if req.cache is not None else False
+        ),
+        req=req,
     )
-    tree_cache.cache_unfinished_req(req, **kwargs)
+    unfinish_result = tree_cache.cache_unfinished_req(unfinish_params)
+
+    # Return-not-mutate: the cache reports the refreshed prefix_indices, the new
+    # cache_protected_len and the post-handover lock state; the orchestrator
+    # writes them onto the Req. StreamingSession / disabled paths short-circuit
+    # and write req.prefix_indices themselves, returning None here.
+    if unfinish_result is None:
+        return
+    if unfinish_result.prefix_indices is not None:
+        req.prefix_indices = unfinish_result.prefix_indices
+    if unfinish_result.cache_protected_len is not None and req.cache is not None:
+        req.cache_protected_len = unfinish_result.cache_protected_len
+    if unfinish_result.lock_handover and req.cache is not None:
+        req.last_node = unfinish_result.last_node
+        req.swa_uuid_for_lock = unfinish_result.swa_uuid_for_lock
+        if unfinish_result.swa_prefix_lock_released is not None:
+            req.swa_prefix_lock_released = unfinish_result.swa_prefix_lock_released
 
 
 def write_cache_indices(

@@ -37,11 +37,13 @@ logger = logging.getLogger(__name__)
 from sglang.srt.mem_cache.base_prefix_cache import (
     BasePrefixCache,
     CacheFinishParams,
+    CacheUnfinishParams,
     DecLockRefParams,
     DecLockRefResult,
     EvictParams,
     EvictResult,
     FinishResult,
+    UnfinishResult,
     IncLockRefResult,
     InsertParams,
     InsertResult,
@@ -477,18 +479,19 @@ class RadixCache(KVCacheEventMixin, BasePrefixCache):
         # unaligned tail-free [key_len:].
         return FinishResult(prefix_len=prefix_len, key_len=key_len)
 
-    def cache_unfinished_req(self, req: Req, chunked=False):
+    def cache_unfinished_req(
+        self, params: CacheUnfinishParams
+    ) -> Optional[UnfinishResult]:
         """Cache request when it is unfinished."""
         if self.disable:
-            return
+            return None
 
-        token_ids = req.get_fill_ids()
-        kv_indices = self.req_to_token_pool.req_to_token[
-            req.req_pool_idx, : len(token_ids)
-        ]
+        token_ids = params.token_ids
+        kv_indices = params.kv_indices[: len(token_ids)]
+        old_prefix_len = params.prev_prefix_len
 
         radix_key = RadixKey(
-            token_ids, req.extra_key, is_bigram=self.is_eagle
+            token_ids, params.extra_key, is_bigram=self.is_eagle
         ).page_aligned(self.page_size)
         values = kv_indices[: len(radix_key)].to(dtype=torch.int64, copy=True)
 
@@ -497,15 +500,13 @@ class RadixCache(KVCacheEventMixin, BasePrefixCache):
             InsertParams(
                 key=radix_key,
                 value=values,
-                chunked=chunked,
-                priority=getattr(req, "priority", 0) or 0,
+                chunked=params.chunked,
+                priority=params.priority,
             )
         )
         new_prefix_len = result.prefix_len
 
-        self.token_to_kv_pool_allocator.free(
-            kv_indices[req.cache_protected_len : new_prefix_len]
-        )
+        self.token_to_kv_pool_allocator.free(kv_indices[old_prefix_len:new_prefix_len])
 
         # The prefix indices could be updated, reuse it
         match_result = self.match_prefix(MatchPrefixParams(key=radix_key))
@@ -518,30 +519,33 @@ class RadixCache(KVCacheEventMixin, BasePrefixCache):
         ), f"{len(new_indices)=}, {len(radix_key)=}"
 
         self.req_to_token_pool.write(
-            (req.req_pool_idx, slice(req.cache_protected_len, len(new_indices))),
-            new_indices[req.cache_protected_len :],
+            (params.req_pool_idx, slice(old_prefix_len, len(new_indices))),
+            new_indices[old_prefix_len:],
         )
 
         # The cache_protected_len is not always equal to len(req.prefix_indices)
         # since for page_size > 1, the partial part is added to req.prefix_indices, but that part of kv indices is not added to the tree.
         # It should be freed in the next cache_unfinished_req and final cache_finished_req to avoid memory leak.
         # So we introduce this `cache_protected_len` field to make sure the partial part can be freed correctly.
-        req.cache_protected_len = len(new_indices)
+        new_cache_protected_len = len(new_indices)
 
-        self.dec_lock_ref(req.last_node)
+        self.dec_lock_ref(params.last_node)
         self.inc_lock_ref(new_last_node)
 
         # `req.prefix_indices` will be used in `PrefillAdder::add_chunked_req` later
         # - page_size != 1: there is a partial page at the end, keep the full kv_indices
         # - eagle case: bigram keys will only cache len - 1 kv indices
         if len(new_indices) < len(kv_indices):
-            req.prefix_indices = torch.cat(
-                [new_indices, kv_indices[len(new_indices) :]]
-            )
+            new_prefix_indices = torch.cat([new_indices, kv_indices[len(new_indices) :]])
         else:
-            req.prefix_indices = new_indices
+            new_prefix_indices = new_indices
 
-        req.last_node = new_last_node
+        return UnfinishResult(
+            prefix_indices=new_prefix_indices,
+            cache_protected_len=new_cache_protected_len,
+            lock_handover=True,
+            last_node=new_last_node,
+        )
 
     def pretty_print(self):
         self._print_helper(self.root_node, 0)

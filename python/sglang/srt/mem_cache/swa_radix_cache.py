@@ -32,11 +32,13 @@ from sglang.srt.mem_cache.allocator.swa import SWATokenToKVPoolAllocator
 from sglang.srt.mem_cache.base_prefix_cache import (
     BasePrefixCache,
     CacheFinishParams,
+    CacheUnfinishParams,
     DecLockRefParams,
     DecLockRefResult,
     EvictParams,
     EvictResult,
     FinishResult,
+    UnfinishResult,
     IncLockRefResult,
     InsertParams,
     InsertResult,
@@ -481,27 +483,24 @@ class SWARadixCache(KVCacheEventMixin, BasePrefixCache):
         )
         return None
 
-    def cache_unfinished_req(self, req: Req, chunked=False) -> None:
+    def cache_unfinished_req(
+        self, params: CacheUnfinishParams
+    ) -> Optional[UnfinishResult]:
         """Cache request when it is unfinished."""
         if self.disable:
-            kv_indices = self.req_to_token_pool.req_to_token[
-                req.req_pool_idx, : req.fill_len
-            ]
+            kv_indices = params.kv_indices[: len(params.token_ids)]
 
             # `req.prefix_indices` will be used in `PrefillAdder::add_chunked_req` later
-            req.prefix_indices = kv_indices
-            return
+            return UnfinishResult(prefix_indices=kv_indices)
 
-        token_ids = req.get_fill_ids()
-        kv_indices = self.req_to_token_pool.req_to_token[
-            req.req_pool_idx, : len(token_ids)
-        ]
+        token_ids = params.token_ids
+        kv_indices = params.kv_indices[: len(token_ids)]
 
         radix_key = RadixKey(
-            token_ids, req.extra_key, is_bigram=self.is_eagle
+            token_ids, params.extra_key, is_bigram=self.is_eagle
         ).page_aligned(self.page_size)
         values = kv_indices[: len(radix_key)].to(dtype=torch.int64, copy=True)
-        old_prefix_len = req.cache_protected_len
+        old_prefix_len = params.prev_prefix_len
 
         # Radix Cache takes one ref in memory pool
         # Note: the insert function already frees the overlapped kv_indices
@@ -524,30 +523,34 @@ class SWARadixCache(KVCacheEventMixin, BasePrefixCache):
         assert old_prefix_len <= len(new_indices), f"{old_prefix_len=}, {new_indices=}"
         assert new_prefix_len <= len(new_indices), f"{new_prefix_len=}, {new_indices=}"
         self.req_to_token_pool.write(
-            (req.req_pool_idx, slice(old_prefix_len, len(new_indices))),
+            (params.req_pool_idx, slice(old_prefix_len, len(new_indices))),
             new_indices[old_prefix_len:],
         )
 
-        req.cache_protected_len = len(new_indices)
+        new_cache_protected_len = len(new_indices)
 
         self.dec_lock_ref(
-            req.last_node,
-            DecLockRefParams(swa_uuid_for_lock=req.swa_uuid_for_lock),
-            skip_swa=req.swa_prefix_lock_released,
+            params.last_node,
+            DecLockRefParams(swa_uuid_for_lock=params.swa_uuid_for_lock),
+            skip_swa=params.swa_prefix_lock_released,
         )
-        req.swa_prefix_lock_released = False
         result = self.inc_lock_ref(new_last_node)
         swa_uuid_for_lock = result.swa_uuid_for_lock
 
         # `req.prefix_indices` will be used in `PrefillAdder::add_chunked_req` later
         if len(new_indices) < len(kv_indices):
-            req.prefix_indices = torch.cat(
-                [new_indices, kv_indices[len(new_indices) :]]
-            )
+            new_prefix_indices = torch.cat([new_indices, kv_indices[len(new_indices) :]])
         else:
-            req.prefix_indices = new_indices
-        req.last_node = new_last_node
-        req.swa_uuid_for_lock = swa_uuid_for_lock
+            new_prefix_indices = new_indices
+
+        return UnfinishResult(
+            prefix_indices=new_prefix_indices,
+            cache_protected_len=new_cache_protected_len,
+            lock_handover=True,
+            last_node=new_last_node,
+            swa_uuid_for_lock=swa_uuid_for_lock,
+            swa_prefix_lock_released=False,
+        )
 
     def pretty_print(self) -> None:
         self._print_helper(self.root_node, 0)
