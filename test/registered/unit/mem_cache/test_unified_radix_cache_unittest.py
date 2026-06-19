@@ -3170,6 +3170,28 @@ class UnifiedRadixCacheSuite:
         self.assertIs(with_hicache.last_device_node, tree_h.root_node)
         self.assertIsNone(with_hicache.mamba_branching_seqlen)
 
+    def test_pure_query_branching_seqlen_survives_to_owned_mamba_slot(self):
+        """Pure-query match staging carries branching seqlen onto the mamba slot allocated for a fresh req."""
+        if not self.cfg.has_mamba or self.cfg.has_swa or self.cfg.page_size != 1:
+            self.skipTest("requires page_size=1 Full+Mamba")
+        _, _, req_to_token_pool = build_fixture(self.cfg)
+        chunk_size = get_global_server_args().mamba_cache_chunk_size
+
+        req = Req(
+            rid=self._rid,
+            origin_input_text="",
+            origin_input_ids=array("q"),
+            sampling_params=SamplingParams(temperature=0, max_new_tokens=1),
+        )
+        self._rid += 1
+        self.assertIsNone(req.mamba)
+        req.mamba_branching_seqlen_pending = chunk_size
+
+        req_to_token_pool.alloc([req])
+
+        self.assertIsNotNone(req.mamba)
+        self.assertEqual(req.mamba.mamba_branching_seqlen, chunk_size)
+
     def test_scheduler_hicache_full_mamba_init_load_back_appends_new_indices(self):
         if not self.cfg.has_mamba or self.cfg.has_swa or self.cfg.page_size != 1:
             self.skipTest("requires page_size=1 Full+Mamba")

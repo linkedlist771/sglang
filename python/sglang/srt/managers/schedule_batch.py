@@ -818,6 +818,7 @@ class Req(ReqDllmMixin):
         self.mamba: Optional[ReqMambaInfo] = None
         # Deferred COW: source mamba pool index from radix cache node (copy on forward stream)
         self.mamba_cow_src_index: Optional[torch.Tensor] = None
+        self.mamba_branching_seqlen_pending: Optional[int] = None
         # Deferred clear: newly allocated mamba slot needs zeroing on forward stream
         self.mamba_needs_clear: bool = False
         # Lazy extra buffer: skip radix cache insert when prealloc failed at
@@ -1287,18 +1288,12 @@ class Req(ReqDllmMixin):
                 match_result.swa_host_hit_length,
                 match_result.mamba_host_hit_length,
             )
-            # mamba_branching_seqlen only applies to a req that holds a mamba
-            # slot (created by the COW inside the match_prefix above). Setting it
-            # on a mamba-less req would write through a None self.mamba.
-            if (
-                match_result.mamba_branching_seqlen is not None
-                and self.mamba is not None
-            ):
-                self.mamba.mamba_branching_seqlen = match_result.mamba_branching_seqlen
-            # match is a pure query: it only reports the COW source index. The
-            # owned-mamba destination slot is allocated later in the owned-KV
-            # alloc phase (HybridReqToTokenPool.alloc), where the matched node is
-            # already protected by the standard prefix lock.
+            # match is a pure query: it only reports the COW source index and the
+            # branching seqlen. The owned-mamba destination slot is allocated
+            # later in the owned-KV alloc phase (HybridReqToTokenPool.alloc),
+            # where the matched node is already protected by the standard prefix
+            # lock; the staged values are applied onto req.mamba there.
+            self.mamba_branching_seqlen_pending = match_result.mamba_branching_seqlen
             if cow_mamba:
                 self.mamba_cow_src_index = match_result.mamba_cow_src
             if match_result.cache_protected_len is not None:
@@ -1565,6 +1560,7 @@ class Req(ReqDllmMixin):
         # mamba free) before reset_for_retract runs, so a fresh ReqMambaInfo is
         # created at the next alloc. These plain attributes are not part of it.
         self.mamba_cow_src_index = None
+        self.mamba_branching_seqlen_pending = None
         self.mamba_needs_clear = False
         self.already_computed = 0
         # kv is already None here: retract frees KV (release_kv_cache ->
