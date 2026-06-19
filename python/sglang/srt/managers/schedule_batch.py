@@ -1116,7 +1116,7 @@ class Req(ReqDllmMixin):
 
     @property
     def mamba_pool_idx(self) -> Optional[torch.Tensor]:
-        return self.mamba.mamba_pool_idx
+        return self.mamba.mamba_pool_idx if self.mamba is not None else None
 
     @mamba_pool_idx.setter
     def mamba_pool_idx(self, value: Optional[torch.Tensor]) -> None:
