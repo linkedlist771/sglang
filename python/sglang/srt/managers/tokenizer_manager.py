@@ -77,6 +77,7 @@ from sglang.srt.managers.io_struct import (
     async_sock_recv,
     async_sock_send,
     sock_send,
+    wrap_as_pickle,
 )
 from sglang.srt.managers.load_snapshot import create_load_snapshot_reader
 from sglang.srt.managers.mm_utils import TensorTransportMode, wrap_shm_features
@@ -1177,7 +1178,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             tokenized_obj = TokenizedEmbeddingReqInput(
                 input_text=input_text,
                 input_ids=input_ids_arr,
-                image_inputs=mm_inputs,
+                mm_inputs=mm_inputs,
                 token_type_ids=token_type_ids,
                 sampling_params=sampling_params,
                 positional_embed_overrides=positional_embed_overrides,
@@ -1311,6 +1312,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
     ):
         tokenized_obj.time_stats.set_api_server_dispatch_time()
         tokenized_obj = wrap_shm_features(tokenized_obj)
+        _wrap_multimodal_payload_for_ipc(tokenized_obj)
         self.send_to_scheduler.send_obj(tokenized_obj)
         tokenized_obj.time_stats.set_api_server_dispatch_finish_time()
 
@@ -1321,6 +1323,9 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
         ],
     ):
         """Send a batch of tokenized requests as a single batched request to the scheduler."""
+        for tokenized_obj in tokenized_objs:
+            _wrap_multimodal_payload_for_ipc(tokenized_obj)
+
         if isinstance(tokenized_objs[0], TokenizedGenerateReqInput):
             batch_req = BatchTokenizedGenerateReqInput(batch=tokenized_objs)
         else:
@@ -3095,6 +3100,17 @@ def _attach_multi_http_worker_info(req: Any, tokenizer_ipc_name: str):
         req.http_worker_ipcs = [tokenizer_ipc_name] * req_len
     else:
         raise ValueError(f"Unknown req type: {type(req)}")
+
+
+def _wrap_multimodal_payload_for_ipc(
+    tokenized_obj: Union[TokenizedGenerateReqInput, TokenizedEmbeddingReqInput],
+):
+    if isinstance(tokenized_obj, TokenizedGenerateReqInput):
+        tokenized_obj.mm_inputs = wrap_as_pickle(tokenized_obj.mm_inputs)
+    elif isinstance(tokenized_obj, TokenizedEmbeddingReqInput):
+        tokenized_obj.mm_inputs = wrap_as_pickle(tokenized_obj.mm_inputs)
+    else:
+        raise ValueError(f"Unknown tokenized obj type: {type(tokenized_obj)}")
 
 
 class SenderWrapper:

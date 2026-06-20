@@ -39,11 +39,7 @@ from zmq.asyncio import Socket as AsyncSocket
 from sglang.srt.environ import envs
 from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.embed_types import PositionalEmbeds
-from sglang.srt.managers.schedule_batch import (
-    Modality,
-    MultimodalInputs,
-    MultimodalProcessorOutput,
-)
+from sglang.srt.managers.schedule_batch import Modality
 from sglang.srt.multimodal.mm_utils import has_valid_data
 from sglang.srt.observability.req_time_stats import (
     APIServerReqTimeStats,
@@ -816,7 +812,7 @@ class TokenizedGenerateReqInput(BaseReq, kw_only=True):
     # The input token ids
     input_ids: Optional[array]  # Optional[array[int]]
     # The multimodal inputs
-    mm_inputs: Optional[MultimodalProcessorOutput]
+    mm_inputs: Optional[PickleWrapper]  # Pickled Optional[MultimodalProcessorOutput]
     # The sampling parameters
     sampling_params: SamplingParams
     # Whether to return the logprobs
@@ -1159,8 +1155,8 @@ class TokenizedEmbeddingReqInput(BaseReq, kw_only=True):
     input_text: Optional[Union[str, List[Union[str, List[str]]]]]  # str
     # The input token ids
     input_ids: Optional[array]  # array[int]
-    # The image inputs
-    image_inputs: Optional[MultimodalInputs]
+    # The multimodal inputs
+    mm_inputs: Optional[PickleWrapper]  # Pickled Optional[MultimodalProcessorOutput]
     # The token type ids
     token_type_ids: Optional[List[int]]
     # Dummy sampling params for compatibility
@@ -2184,7 +2180,6 @@ class DumperControlReqOutput(BaseReq, kw_only=True):
 _IGNORE_REQ_TYPES_CHECK = (
     GenerateReqInput.__name__,
     EmbeddingReqInput.__name__,
-    MultimodalProcessorOutput.__name__,
 )
 
 
@@ -2219,6 +2214,18 @@ _check_all_req_types()
 # Below are msgpack serialization and ipc utils
 class PickleWrapper(msgspec.Struct, tag=True, array_like=True):
     data: bytes
+
+
+def wrap_as_pickle(obj: Any) -> Optional[PickleWrapper]:
+    if obj is None or isinstance(obj, PickleWrapper):
+        return obj
+    return PickleWrapper(pickle.dumps(obj))
+
+
+def unwrap_from_pickle(obj: Any) -> Any:
+    if isinstance(obj, PickleWrapper):
+        return pickle.loads(obj.data)
+    return obj
 
 
 def enc_hook(obj: Any) -> Any:

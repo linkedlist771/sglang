@@ -40,7 +40,6 @@ import dataclasses
 import logging
 import re
 from array import array
-from collections.abc import MutableMapping
 from concurrent.futures import Future
 from enum import Enum, auto
 from functools import lru_cache
@@ -57,7 +56,6 @@ from typing import (
     Union,
 )
 
-import msgspec
 import numpy as np
 import torch
 
@@ -242,117 +240,6 @@ class MultimodalInputFormat(Enum):
     PRECOMPUTED_EMBEDDING = auto()
 
 
-class DataType(Enum):
-    TENSOR = auto()
-    NDARRAY = auto()
-    SHM_DATA = auto()
-    CUDA_IPC_PROXY = auto()
-
-
-@dataclasses.dataclass
-class TensorOrNdarray:
-    """A wrapper that can hold either a torch.Tensor or a numpy.ndarray, with an indicator of which type it holds.
-    This is used in MultimodalDataItem to allow for flexible storage of features and precomputed embeddings,
-    which may be returned as either tensors or ndarrays from different multimodal processors.
-    """
-
-    data_type: DataType
-    tensor: Optional[torch.Tensor] = None
-    ndarray: Optional[np.ndarray] = None
-    shm_data: Optional[object] = (
-        None  # use object instead of ShmPointerMMData to avoid circular import
-    )
-    cuda_ipc_proxy: Optional[CudaIpcTensorTransportProxy] = None
-
-    @property
-    def value(self):
-        if self.data_type == DataType.TENSOR:
-            return self.tensor
-        elif self.data_type == DataType.NDARRAY:
-            return self.ndarray
-        elif self.data_type == DataType.SHM_DATA:
-            return self.shm_data
-        elif self.data_type == DataType.CUDA_IPC_PROXY:
-            return self.cuda_ipc_proxy
-        else:
-            raise ValueError(f"Invalid data_type: {self.data_type}")
-
-    @classmethod
-    def from_value(cls, value: Any):
-        from sglang.srt.managers.mm_utils import ShmPointerMMData
-
-        if value is None:
-            return None
-        elif isinstance(value, list):
-            if len(value) > 0 and isinstance(value[0], ShmPointerMMData):
-                return [
-                    TensorOrNdarray(data_type=DataType.SHM_DATA, shm_data=item)
-                    for item in value
-                ]
-            elif len(value) > 0 and isinstance(value[0], torch.Tensor):
-                return [
-                    TensorOrNdarray(data_type=DataType.TENSOR, tensor=item)
-                    for item in value
-                ]
-        elif isinstance(value, torch.Tensor):
-            return TensorOrNdarray(data_type=DataType.TENSOR, tensor=value)
-        elif isinstance(value, np.ndarray):
-            return TensorOrNdarray(data_type=DataType.NDARRAY, ndarray=value)
-        elif isinstance(value, ShmPointerMMData):
-            return TensorOrNdarray(data_type=DataType.SHM_DATA, shm_data=value)
-        elif isinstance(value, CudaIpcTensorTransportProxy):
-            return TensorOrNdarray(
-                data_type=DataType.CUDA_IPC_PROXY, cuda_ipc_proxy=value
-            )
-        elif isinstance(value, TensorOrNdarray):
-            return value
-        else:
-            raise ValueError(
-                f"value must be a torch.Tensor, np.ndarray, ShmPointerMMData, "
-                f"CudaIpcTensorTransportProxy, List[torch.Tensor], List[ShmPointerMMData] or None, got {type(value)}"
-            )
-
-
-class ModelSpecificData(MutableMapping):
-    """A custom type wrapper for model-specific data, which cannot be directly serialized via msgpack since
-    it may contain various types of data, e.g. tensors, lists, dicts, etc. By wrapping it with ModelSpecificData,
-    it will be automatically serialized via pickle, we need to sort out all known types later.
-    """
-
-    data: dict[str, Any] = {}
-
-    def __init__(self, data: dict[str, Any] | None = None):
-        self.data: dict[str, Any] = dict(data) if data else {}  # per-instance
-
-    def __getitem__(self, key):
-        return self.data[key]
-
-    def __setitem__(self, key, value):
-        self.data[key] = value
-
-    def __delitem__(self, key):
-        del self.data[key]
-
-    def __iter__(self):
-        return iter(self.data)
-
-    def __len__(self):
-        return len(self.data)
-
-    @classmethod
-    def from_value(cls, value: Any):
-        if value is None:
-            return ModelSpecificData()
-        elif isinstance(value, dict):
-            return ModelSpecificData(value)
-        elif isinstance(value, ModelSpecificData):
-            return value
-        else:
-            raise ValueError(
-                f"value must be a dict, ModelSpecificData or None, got {type(value)}"
-            )
-
-
 @dataclasses.dataclass
 class MultimodalDataItem:
     """
@@ -362,108 +249,37 @@ class MultimodalDataItem:
     Each item has its own hash and pad_value, enabling per-image RadixAttention caching.
 
     We put the common fields first and the model-specific fields in model_specific_data.
-
-    Keep this class as dataclass instead of msgpack struct due to heavily usage and most fields
-    are not directly serialized (e.g. feature, precomputed_embeddings, model_specific_data)
     """
 
     modality: Modality
-    hash: Optional[int] = None
-    pad_value: Optional[int] = None
-    offsets: Optional[List[Tuple[int, int]]] = None
+    hash: int = None
+    pad_value: int = None
+    offsets: Optional[list] = None
 
     format: MultimodalInputFormat = MultimodalInputFormat.NORMAL
 
     # the raw features returned by processor, e.g. pixel_values or audio_features
-    _feature: Optional[Union[TensorOrNdarray, List[TensorOrNdarray]]] = None
+    feature: Union[torch.Tensor, np.ndarray] = None
     # the precomputed embeddings, passed as final encoder embeddings
     # One and only one of the feature and precomputed_embeddings will be empty
-    _precomputed_embeddings: Optional[TensorOrNdarray] = None
+    precomputed_embeddings: Optional[Union[torch.Tensor, np.ndarray]] = None
 
     # Model-specific data stored in a dictionary
-    _model_specific_data: ModelSpecificData = msgspec.field(
-        default_factory=ModelSpecificData
-    )
-
-    def __init__(
-        self,
-        modality: Modality,
-        hash: Optional[int] = None,
-        pad_value: Optional[int] = None,
-        offsets: Optional[List[Tuple[int, int]]] = None,
-        format: MultimodalInputFormat = MultimodalInputFormat.NORMAL,
-        feature: Optional[Union[torch.Tensor, np.ndarray]] = None,
-        precomputed_embeddings: Optional[Union[torch.Tensor, np.ndarray]] = None,
-        model_specific_data: Optional[Dict[str, Any]] = None,
-    ):
-        self.modality = modality
-        self.hash = hash
-        self.pad_value = pad_value
-        self.offsets = offsets
-        self.format = format
-        self._feature = TensorOrNdarray.from_value(feature)
-        self._precomputed_embeddings = TensorOrNdarray.from_value(
-            precomputed_embeddings
-        )
-        self._model_specific_data = ModelSpecificData.from_value(model_specific_data)
-
-    @property
-    def precomputed_embeddings(self):
-        if self._precomputed_embeddings is None:
-            return None
-        elif isinstance(self._precomputed_embeddings, list):
-            return [t.value for t in self._precomputed_embeddings]
-        return self._precomputed_embeddings.value
-
-    @precomputed_embeddings.setter
-    def precomputed_embeddings(self, value: Any):
-        self._precomputed_embeddings = TensorOrNdarray.from_value(value)
-
-    @property
-    def feature(self):
-        if self._feature is None:
-            return None
-        elif isinstance(self._feature, list):
-            return [t.value for t in self._feature]
-        return self._feature.value
-
-    @feature.setter
-    def feature(self, value: Any):
-        self._feature = TensorOrNdarray.from_value(value)
-
-    @property
-    def model_specific_data(self):
-        return self._model_specific_data.data
-
-    @model_specific_data.setter
-    def model_specific_data(self, value: Any):
-        self._model_specific_data = ModelSpecificData.from_value(value)
+    model_specific_data: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     def __getattr__(self, name: str):
         if (
-            "_model_specific_data" in self.__dict__
-            and name in self.__dict__["_model_specific_data"].data
+            "model_specific_data" in self.__dict__
+            and name in self.__dict__["model_specific_data"]
         ):
-            return self.__dict__["_model_specific_data"].data[name]
+            return self.__dict__["model_specific_data"][name]
         else:
             raise AttributeError(
                 f"'{self.__class__.__name__}' object has no attribute '{name}'"
             )
 
-    def __setattr__(self, name: str, value: Any):
-        # Route attribute assignment through the same dispatch as item
-        # assignment / set(), so unknown names land in model_specific_data and
-        # survive msgpack (de)serialization, mirroring __getattr__.
-        self.__setitem__(name, value)
-
     def __setitem__(self, key: str, value: Any):
-        if key == "feature":
-            self._feature = TensorOrNdarray.from_value(value)
-        elif key == "precomputed_embeddings":
-            self._precomputed_embeddings = TensorOrNdarray.from_value(value)
-        elif key == "model_specific_data":
-            self._model_specific_data = ModelSpecificData.from_value(value)
-        elif key in self.__dataclass_fields__ or key in self.__dict__:
+        if key in self.__dict__:
             self.__dict__[key] = value
         else:
             self.model_specific_data[key] = value
@@ -546,11 +362,9 @@ class MultimodalDataItem:
     def reconstruct(self, target_device: int):
         """materialize cuda ipc proxy tensors in-place on target_device"""
         if isinstance(self.feature, CudaIpcTensorTransportProxy):
-            self._feature = TensorOrNdarray.from_value(
-                self.feature.reconstruct_on_target_device(target_device)
-            )
+            self.feature = self.feature.reconstruct_on_target_device(target_device)
         if isinstance(self.precomputed_embeddings, CudaIpcTensorTransportProxy):
-            self._precomputed_embeddings = TensorOrNdarray.from_value(
+            self.precomputed_embeddings = (
                 self.precomputed_embeddings.reconstruct_on_target_device(target_device)
             )
         for extra_key in self.model_specific_data:
@@ -563,7 +377,8 @@ class MultimodalDataItem:
                 self.model_specific_data[extra_key] = extra_data
 
 
-class MultimodalProcessorOutput(msgspec.Struct):
+@dataclasses.dataclass
+class MultimodalProcessorOutput:
     """Raw output from multimodal processors before scheduler-side preparation (pad, hash).
 
     This is the typed replacement for the dict previously returned by
@@ -646,13 +461,14 @@ class MultimodalProcessorOutput(msgspec.Struct):
         return padded_input_ids
 
 
-class MultimodalInputs(msgspec.Struct):
+@dataclasses.dataclass
+class MultimodalInputs:
     """The multimodal data related inputs."""
 
     # items of data
     mm_items: List[MultimodalDataItem]
     padded_input_ids: Optional[List[int]] = None
-    image_pad_len: Optional[List[int]] = None
+    image_pad_len: Optional[list] = None
     num_image_tokens: Optional[int] = None
 
     # image
@@ -679,9 +495,6 @@ class MultimodalInputs(msgspec.Struct):
     vision_position_ids: Optional[torch.Tensor] = None
     media_nums_per_sample: Optional[List[int]] = None
     visible_frame_counts: Optional[torch.Tensor] = None
-
-    data_offsets: Optional[List[int]] = None  # used by nano_nemotron_vl
-    image_offsets: Optional[List[int]] = None  # used by llava and llavavid
 
     def release_features(self):
         """Release feature tensors to free GPU memory."""
@@ -821,7 +634,7 @@ class MultimodalInputs(msgspec.Struct):
                     [self.mrope_position_delta, other.mrope_position_delta], dim=0
                 )
 
-        for key in other.__struct_fields__:
+        for key, val in other.__dict__.items():
             if "_id" in key:
                 # set token_ids
                 if getattr(self, key, None) is None:
