@@ -1747,7 +1747,6 @@ def wrap_shm_features(obj):
                 item.precomputed_embeddings = _wrap_tensor_or_list(
                     item.precomputed_embeddings, precomputed_hash=item_hash
                 )
-
     return obj
 
 
