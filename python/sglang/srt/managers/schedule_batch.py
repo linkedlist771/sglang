@@ -1067,7 +1067,7 @@ class Req(ReqDllmMixin):
 
     @property
     def cache_protected_len(self) -> int:
-        return self.cache.cache_protected_len
+        return self.cache.cache_protected_len if self.cache is not None else 0
 
     @cache_protected_len.setter
     def cache_protected_len(self, value: int) -> None:
