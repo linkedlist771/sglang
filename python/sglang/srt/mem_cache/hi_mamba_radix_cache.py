@@ -1042,30 +1042,14 @@ class HiMambaRadixCache(MambaRadixCache):
             1 if (last_host_node.mamba_evicted and last_host_node.mamba_backuped) else 0
         )
 
-        mamba_node = best_last_node
-        if cow_mamba and mamba_node.mamba_value is not None:
-            from sglang.srt.managers.schedule_batch import ReqMambaInfo
-
-            if req.mamba is None or req.mamba.mamba_pool_idx is None:
-                dst_index = self._alloc_with_evict(
-                    self.req_to_token_pool.mamba_allocator,
-                    1,
-                    self.evict_mamba,
-                    lock_node=mamba_node,
-                    error_message="Can not alloc mamba cache",
-                )
-                if req.mamba is None:
-                    req.mamba = ReqMambaInfo(
-                        mamba_pool_idx=dst_index[0],
-                        mamba_ping_pong_track_buffer=None,
-                        mamba_next_track_idx=None,
-                        mamba_last_track_seqlen=None,
-                        mamba_branching_seqlen=None,
-                    )
-                else:
-                    req.mamba.mamba_pool_idx = dst_index[0]
-            req.mamba_cow_src_index = mamba_node.mamba_value
-            req.mamba_needs_clear = False
+        # Defer COW to the owned-KV alloc phase: only report the source index so
+        # the orchestrator can allocate the destination once the matched node is
+        # protected by the standard prefix lock.
+        mamba_cow_src = (
+            best_last_node.mamba_value
+            if (cow_mamba and best_last_node.mamba_value is not None)
+            else None
+        )
 
         value = value[:best_value_len]
         if value:
@@ -1082,6 +1066,7 @@ class HiMambaRadixCache(MambaRadixCache):
             host_hit_length=kv_host_hit_length,
             mamba_host_hit_length=mamba_host_hit,
             mamba_branching_seqlen=mamba_branching_seqlen,
+            mamba_cow_src=mamba_cow_src,
         )
 
     def _split_node(self, key: RadixKey, child: TreeNode, split_len: int) -> TreeNode:
