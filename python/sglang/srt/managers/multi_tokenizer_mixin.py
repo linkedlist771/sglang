@@ -104,6 +104,17 @@ class SocketMapping:
         sock_send(self._mapping[ipc_name], output)
 
 
+def _attach_multi_http_worker_info(req: Any, tokenizer_ipc_name: str):
+    if hasattr(req, "http_worker_ipc"):
+        req.http_worker_ipc = tokenizer_ipc_name
+    elif hasattr(req, "http_worker_ipcs"):
+        rids = getattr(req, "rids", None)
+        req_len = len(rids) if rids is not None else len(req)
+        req.http_worker_ipcs = [tokenizer_ipc_name] * req_len
+    else:
+        raise ValueError(f"Unknown req type: {type(req)}")
+
+
 def _extract_field_by_index(
     output: Any, field_name: str, index: int, check_length: bool = True
 ) -> Any:
@@ -622,7 +633,7 @@ class TokenizerWorker(TokenizerManager):
         self._pause_continue_future = loop.create_future()
         # Send to router which will broadcast to all workers
         # (router also handles forwarding to scheduler for non-abort modes)
-        await self.send_to_scheduler.async_send_obj(obj)
+        self.send_to_scheduler.send_obj(obj)
 
         await self._pause_continue_future
 
@@ -638,7 +649,7 @@ class TokenizerWorker(TokenizerManager):
     async def continue_generation(self, obj: ContinueGenerationReqInput):
         loop = asyncio.get_event_loop()
         self._pause_continue_future = loop.create_future()
-        await self.send_to_scheduler.async_send_obj(obj)
+        self.send_to_scheduler.send_obj(obj)
         await self._pause_continue_future
 
     def _handle_pause_continue_broadcast(self, obj: PauseContinueBroadcastReq):
@@ -659,6 +670,9 @@ class TokenizerWorker(TokenizerManager):
         if self._pause_continue_future and not self._pause_continue_future.done():
             self._pause_continue_future.set_result(True)
             self._pause_continue_future = None
+
+    def _attach_multi_http_worker_info(self, req: Any):
+        _attach_multi_http_worker_info(req, self.tokenizer_ipc_name)
 
 
 async def print_exception_wrapper(func):
@@ -742,11 +756,9 @@ class SenderWrapper:
         self.send_to_scheduler = send_to_scheduler
 
     def send_obj(self, obj):
-        if hasattr(obj, "http_worker_ipc"):
-            obj.http_worker_ipc = self.port_args.tokenizer_ipc_name
+        _attach_multi_http_worker_info(obj, self.port_args.tokenizer_ipc_name)
         sock_send(self.send_to_scheduler, obj)
 
     async def async_send_obj(self, obj):
-        if hasattr(obj, "http_worker_ipc"):
-            obj.http_worker_ipc = self.port_args.tokenizer_ipc_name
+        _attach_multi_http_worker_info(obj, self.port_args.tokenizer_ipc_name)
         await async_sock_send(self.send_to_scheduler, obj)
