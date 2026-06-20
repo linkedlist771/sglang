@@ -1464,18 +1464,13 @@ async def load_lora_adapter(
         obj,
         request,
     )
-    result = msgspec.structs.asdict(result)
+    status_code = HTTPStatus.OK if result.success else HTTPStatus.BAD_REQUEST
+    content = msgspec.structs.asdict(result)
 
-    if result.get("success", False):
-        return ORJSONResponse(
-            result,
-            status_code=HTTPStatus.OK,
-        )
-    else:
-        return ORJSONResponse(
-            result,
-            status_code=HTTPStatus.BAD_REQUEST,
-        )
+    return ORJSONResponse(
+        content,
+        status_code=status_code,
+    )
 
 
 @app.api_route("/load_lora_adapter_from_tensors", methods=["POST"])
@@ -1487,12 +1482,10 @@ async def load_lora_adapter_from_tensors(
         obj,
         request,
     )
-    result = msgspec.structs.asdict(result)
+    status_code = HTTPStatus.OK if result.success else HTTPStatus.BAD_REQUEST
+    content = msgspec.structs.asdict(result)
 
-    if result.get("success", False):
-        return ORJSONResponse(result, status_code=HTTPStatus.OK)
-    else:
-        return ORJSONResponse(result, status_code=HTTPStatus.BAD_REQUEST)
+    return ORJSONResponse(content, status_code=status_code)
 
 
 @app.api_route("/unload_lora_adapter", methods=["POST"])
@@ -1505,18 +1498,13 @@ async def unload_lora_adapter(
         obj,
         request,
     )
-    result = msgspec.structs.asdict(result)
+    status_code = HTTPStatus.OK if result.success else HTTPStatus.BAD_REQUEST
+    content = msgspec.structs.asdict(result)
 
-    if result.get("success", False):
-        return ORJSONResponse(
-            result,
-            status_code=HTTPStatus.OK,
-        )
-    else:
-        return ORJSONResponse(
-            result,
-            status_code=HTTPStatus.BAD_REQUEST,
-        )
+    return ORJSONResponse(
+        content,
+        status_code=status_code,
+    )
 
 
 @app.api_route("/open_session", methods=["GET", "POST"])
