@@ -28,6 +28,7 @@ from sglang.srt.observability.req_time_stats import (  # noqa: E402
     MetricsCollectorWrapper,
 )
 from sglang.srt.observability.trace import TraceSpan  # noqa: E402
+from sglang.srt.sampling.sampling_params import SamplingParams  # noqa: E402
 
 register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
@@ -111,6 +112,16 @@ class TestIoStructMsgpack(CustomTestCase):
 
         self.assertEqual(decoded_without_pickle_unwrap, payload)
         self.assertEqual(msgpack_decode(encoded), payload)
+
+    def test_unregistered_top_level_msgspec_struct_uses_pickle_wrapper(self):
+        payload = SamplingParams(stop_token_ids=[1, 2])
+        encoded = msgpack_encode(payload)
+        decoded_without_pickle_unwrap = _msgpack_decoder.decode(encoded)
+
+        self.assertIsInstance(decoded_without_pickle_unwrap, PickleWrapper)
+        rebuilt = msgpack_decode(encoded)
+        self.assertIsInstance(rebuilt, SamplingParams)
+        self.assertEqual(rebuilt.stop_token_ids, {1, 2})
 
     def test_process_local_runtime_handles_are_dropped(self):
         if trace_module.opentelemetry_imported:

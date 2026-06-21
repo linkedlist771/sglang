@@ -2327,8 +2327,8 @@ def hook_custom_types(*new_types: Type):
 
 
 def _maybe_wrap_pickle(obj: Any) -> PickleWrapper:
-    # for msgspec.Struct type, we can directly serialize
-    if isinstance(obj, msgspec.Struct):
+    # Registered IPC structs can be directly decoded by _msgpack_decoder.
+    if isinstance(obj, msgspec.Struct) and type(obj) in _all_types:
         return obj
     # for primitive types, we can directly serialize
     if type(obj) in _primitive_types:

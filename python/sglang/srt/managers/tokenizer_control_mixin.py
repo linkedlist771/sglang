@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import binascii
 import hashlib
 import logging
+import pickle
 import time
 import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -476,11 +478,9 @@ class TokenizerControlMixin:
         if obj.abort_all_requests:
             self.abort_request(abort_all=True)
 
-        serialized_named_tensors = [
-            pybase64.b64decode(data, validate=True) if isinstance(data, str) else data
-            for data in obj.serialized_named_tensors
-        ]
-        obj.serialized_named_tensors = serialized_named_tensors
+        obj.serialized_named_tensors = _decode_serialized_named_tensor_payloads(
+            obj.serialized_named_tensors
+        )
 
         async with self.is_pause_cond:
             is_paused = self.is_pause
@@ -891,3 +891,31 @@ class TokenizerControlMixin:
         """Update weight version if provided."""
         if weight_version is not None:
             self.server_args.weight_version = weight_version
+
+
+def _looks_like_pickle_payload(data: bytes) -> bool:
+    return (
+        len(data) >= 2
+        and data[0] == 0x80
+        and data[1] <= pickle.HIGHEST_PROTOCOL
+    )
+
+
+def _decode_serialized_named_tensor_payload(data: Any) -> Any:
+    if isinstance(data, str):
+        return pybase64.b64decode(data, validate=True)
+
+    if isinstance(data, (bytes, bytearray, memoryview)):
+        data = bytes(data)
+        if _looks_like_pickle_payload(data):
+            return data
+        try:
+            return pybase64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError):
+            return data
+
+    return data
+
+
+def _decode_serialized_named_tensor_payloads(payloads: List[Any]) -> List[Any]:
+    return [_decode_serialized_named_tensor_payload(data) for data in payloads]
