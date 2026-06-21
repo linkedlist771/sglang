@@ -90,7 +90,10 @@ class SchedulerRequestReceiver:
 
         recv_reqs = self._broadcast_reqs_across_ranks(recv_reqs)
 
-        self.unwrap_pickle_wrapper(recv_reqs)
+        # PickleWrapper is only used on the external tokenizer/DP -> scheduler
+        # msgspec IPC edge. PP stages forward already-unwrapped objects via pickle.
+        if self.ps.pp_rank == 0:
+            self.unwrap_pickle_wrapper(recv_reqs)
 
         recv_reqs = self._apply_mm_receiver(recv_reqs)
 
