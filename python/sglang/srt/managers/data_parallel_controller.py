@@ -251,6 +251,7 @@ class DataParallelController:
         req.time_stats = wrap_as_pickle(time_stats)
         self.dispatching(req)
         req.time_stats = time_stats
+        req.time_stats.set_dp_dispatch_finish_time()
 
     def dispatch_batch_generate(self, batch_req: BatchTokenizedGenerateReqInput):
         if self.refresh_load_budget_on_dispatch:
