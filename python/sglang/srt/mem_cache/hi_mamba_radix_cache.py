@@ -1042,14 +1042,40 @@ class HiMambaRadixCache(MambaRadixCache):
             1 if (last_host_node.mamba_evicted and last_host_node.mamba_backuped) else 0
         )
 
-        # Defer COW to the owned-KV alloc phase: only report the source index so
-        # the orchestrator can allocate the destination once the matched node is
-        # protected by the standard prefix lock.
+        # COW source protection (HiCache): best_last_node can be a descendant of
+        # req.last_node, because host load-back reassigns req.last_node to an
+        # ancestor (mamba_host_hit), so the orchestrator prefix lock does not cover
+        # the source. Allocate the COW destination eagerly here with
+        # lock_node=best_last_node so the source mamba state cannot be evicted by a
+        # later alloc_for_extend evict before the deferred copy runs, then report
+        # the source via MatchResult so the orchestrator records it for that copy.
         mamba_cow_src = (
             best_last_node.mamba_value
             if (cow_mamba and best_last_node.mamba_value is not None)
             else None
         )
+        if mamba_cow_src is not None:
+            from sglang.srt.managers.schedule_batch import ReqMambaInfo
+
+            if req.mamba is None or req.mamba.mamba_pool_idx is None:
+                dst_index = self._alloc_with_evict(
+                    self.req_to_token_pool.mamba_allocator,
+                    1,
+                    self.evict_mamba,
+                    lock_node=best_last_node,
+                    error_message="Can not alloc mamba cache",
+                )
+                if req.mamba is None:
+                    req.mamba = ReqMambaInfo(
+                        mamba_pool_idx=dst_index[0],
+                        mamba_ping_pong_track_buffer=None,
+                        mamba_next_track_idx=None,
+                        mamba_last_track_seqlen=None,
+                        mamba_branching_seqlen=None,
+                    )
+                else:
+                    req.mamba.mamba_pool_idx = dst_index[0]
+            req.mamba_needs_clear = False
 
         value = value[:best_value_len]
         if value:
