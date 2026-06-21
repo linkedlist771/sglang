@@ -26,7 +26,17 @@ from array import array
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Any, Dict, List, Optional, Type, Union
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Type,
+    Union,
+)
 
 import msgspec
 import numpy as np
@@ -1486,14 +1496,7 @@ class PauseGenerationReqInput(BaseReq, kw_only=True):
             recomputed after continue_generation.
     """
 
-    mode: str = "abort"
-
-    def __post_init__(self):
-        allowed = ["abort", "retract", "in_place"]
-        if self.mode not in allowed:
-            raise ValueError(
-                f"Invalid mode: {self.mode!r}. " f"Expected one of {allowed}."
-            )
+    mode: Literal["abort", "retract", "in_place"] = "abort"
 
 
 class ContinueGenerationReqInput(BaseReq, kw_only=True):
