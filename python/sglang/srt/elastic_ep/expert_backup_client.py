@@ -12,7 +12,12 @@ from sglang.srt.distributed.parallel_state import (
 )
 from sglang.srt.environ import envs
 from sglang.srt.eplb.expert_location import get_global_expert_location_metadata
-from sglang.srt.managers.io_struct import UpdateExpertBackupReq, sock_recv, sock_send
+from sglang.srt.managers.io_struct import (
+    UpdateExpertBackupReq,
+    sock_recv,
+    sock_send,
+    unwrap_from_pickle,
+)
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils.network import get_local_ip_auto
 
@@ -74,7 +79,9 @@ class ExpertBackupClient:
         cnt = 0
         while cnt < self.engine_num:
             response = sock_recv(self.recv_list[cnt])
-            self.dram_map_list[response.rank] = response.weight_pointer_map
+            self.dram_map_list[response.rank] = unwrap_from_pickle(
+                response.weight_pointer_map
+            )
             self.session_id_list[response.rank] = response.session_id
             self.buffer_size = max(self.buffer_size, response.buffer_size)
             cnt += 1

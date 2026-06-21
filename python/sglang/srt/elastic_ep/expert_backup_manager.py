@@ -9,7 +9,12 @@ import zmq
 from sglang.srt.configs.load_config import LoadConfig
 from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.environ import envs
-from sglang.srt.managers.io_struct import BackupDramReq, sock_recv, sock_send
+from sglang.srt.managers.io_struct import (
+    BackupDramReq,
+    sock_recv,
+    sock_send,
+    wrap_as_pickle,
+)
 from sglang.srt.model_loader.loader import DefaultModelLoader, get_model_loader
 from sglang.srt.model_loader.utils import set_default_torch_dtype
 from sglang.srt.server_args import (
@@ -67,7 +72,7 @@ class ExpertBackupManager:
 
         back_req = BackupDramReq(
             rank=self.engine_rank,
-            weight_pointer_map=self.weight_pointer_map,
+            weight_pointer_map=wrap_as_pickle(self.weight_pointer_map),
             session_id=self.session_id,
             buffer_size=self.continuous_buffer.numel()
             * self.continuous_buffer.element_size(),

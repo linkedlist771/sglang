@@ -136,6 +136,10 @@ class BaseBatchReq(msgspec.Struct, tag=True, kw_only=True, array_like=True):
         return _msgspec_struct_pydantic_core_schema(cls, handler)
 
 
+class PickleWrapper(msgspec.Struct, tag=True, array_like=True):
+    data: bytes
+
+
 # Parameters for a session
 @dataclass
 class SessionParams:
@@ -164,6 +168,7 @@ MultimodalDataInputFormat = Union[
 
 # Serialized form of BaseFinishReason.to_json() — all values are primitives.
 FinishReasonDict = Dict[str, Optional[Union[str, int, List[int]]]]
+CachedTokensDetails = Dict[str, Union[int, str]]
 
 @dataclass
 class GenerateReqInput:
@@ -1241,9 +1246,9 @@ class BatchTokenIDOutput(BaseBatchReq, kw_only=True):
     token_steps: Optional[List[List[int]]] = None
 
     # Customized info
-    customized_info: Optional[Dict[str, List[Any]]] = None
+    customized_info: Optional[PickleWrapper] = None
     # Detailed breakdown of cached tokens by source (device/host/storage)
-    cached_tokens_details: Optional[List[Optional[Dict[str, Any]]]] = None
+    cached_tokens_details: Optional[List[Optional[CachedTokensDetails]]] = None
     # DP rank of the scheduler that processed each request
     dp_ranks: Optional[List[Optional[int]]] = None
 
@@ -1322,9 +1327,9 @@ class BatchStrOutput(BaseBatchReq, kw_only=True):
     token_steps: Optional[List[List[int]]] = None
 
     # Customized info
-    customized_info: Optional[Dict[str, List[Any]]] = None
+    customized_info: Optional[PickleWrapper] = None
     # Detailed breakdown of cached tokens by source (device/host/storage)
-    cached_tokens_details: Optional[List[Optional[Dict[str, Any]]]] = None
+    cached_tokens_details: Optional[List[Optional[CachedTokensDetails]]] = None
     # DP rank of the scheduler that processed each request
     dp_ranks: Optional[List[Optional[int]]] = None
 
@@ -1366,7 +1371,7 @@ class BatchEmbeddingOutput(BaseBatchReq, kw_only=True):
     # Number of times each request was retracted.
     retraction_counts: Optional[List[int]]
     # Detailed breakdown of cached tokens by source (device/host/storage)
-    cached_tokens_details: Optional[List[Optional[Dict[str, Any]]]] = None
+    cached_tokens_details: Optional[List[Optional[CachedTokensDetails]]] = None
 
     # For observability
     time_stats: Optional[List[SchedulerReqTimeStats]] = None
@@ -1650,7 +1655,7 @@ class UpdateExpertBackupReq(BaseReq, kw_only=True):
 
 class BackupDramReq(BaseReq, kw_only=True):
     rank: int
-    weight_pointer_map: Dict[str, Any]
+    weight_pointer_map: PickleWrapper
     session_id: str
     buffer_size: int
 
@@ -2196,11 +2201,6 @@ def _check_all_req_types():
 
 
 _check_all_req_types()
-
-
-# Below are msgpack serialization and ipc utils
-class PickleWrapper(msgspec.Struct, tag=True, array_like=True):
-    data: bytes
 
 
 def wrap_as_pickle(obj: Any) -> Optional[PickleWrapper]:

@@ -79,6 +79,7 @@ from sglang.srt.managers.io_struct import (
     async_sock_recv,
     async_sock_send,
     sock_send,
+    unwrap_from_pickle,
     wrap_as_pickle,
 )
 from sglang.srt.managers.load_snapshot import create_load_snapshot_reader
@@ -1897,8 +1898,9 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     meta_info["cached_tokens_details"] = recv_obj.cached_tokens_details[
                         i
                     ]
-                if recv_obj.customized_info is not None:
-                    for k, v in recv_obj.customized_info.items():
+                customized_info = unwrap_from_pickle(recv_obj.customized_info)
+                if customized_info is not None:
+                    for k, v in customized_info.items():
                         if k not in state.customized_info_accumulated:
                             state.customized_info_accumulated[k] = []
                         state.customized_info_accumulated[k].extend(v[i])

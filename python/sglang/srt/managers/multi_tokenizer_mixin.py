@@ -53,6 +53,8 @@ from sglang.srt.managers.io_struct import (
     async_sock_send,
     sock_recv,
     sock_send,
+    unwrap_from_pickle,
+    wrap_as_pickle,
 )
 from sglang.srt.managers.load_snapshot import (
     create_load_snapshot_reader,
@@ -124,10 +126,21 @@ def _extract_field_by_index(
     if field is None:
         return None
 
+    should_wrap_result = field_name == "customized_info"
+    if should_wrap_result:
+        field = unwrap_from_pickle(field)
+        if field is None:
+            return None
+
     if isinstance(field, dict):
         new_field = {}
         for k, v in field.items():
-            new_field[k] = v[index] if len(v) > index else None
+            if len(v) > index:
+                new_field[k] = [v[index]] if should_wrap_result else v[index]
+            elif not should_wrap_result:
+                new_field[k] = None
+        if should_wrap_result:
+            return wrap_as_pickle(new_field) if new_field else None
         return new_field
 
     if check_length:

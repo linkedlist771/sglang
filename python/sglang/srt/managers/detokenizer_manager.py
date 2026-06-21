@@ -36,6 +36,7 @@ from sglang.srt.managers.io_struct import (
     FreezeGCReq,
     sock_recv,
     sock_send,
+    wrap_as_pickle,
 )
 from sglang.srt.managers.multi_tokenizer_mixin import MultiHttpWorkerDetokenizerMixin
 from sglang.srt.observability.cpu_monitor import start_cpu_monitor_thread
@@ -445,7 +446,7 @@ class DetokenizerManager(MultiHttpWorkerDetokenizerMixin):
             output_hidden_states=recv_obj.output_hidden_states,
             routed_experts=routed_experts,
             indexer_topk=indexer_topk,
-            customized_info=recv_obj.customized_info,
+            customized_info=wrap_as_pickle(recv_obj.customized_info),
             placeholder_tokens_idx=None,
             placeholder_tokens_val=None,
             retraction_counts=recv_obj.retraction_counts,
