@@ -763,7 +763,6 @@ class HybridReqToTokenPool(ReqToTokenPool):
         mamba_ping_pong_track_buffers: list[torch.Tensor] = []
         for req in reqs:
             if req.mamba is not None and req.mamba.mamba_pool_idx is not None:
-                # radix cache / continuing chunked: slot already held
                 pass
             else:
                 mid = self.mamba_allocator.alloc(1)
@@ -944,9 +943,6 @@ class HybridReqToTokenPool(ReqToTokenPool):
                 )
             self.mamba_allocator.free(mamba_ping_pong_track_buffer_to_free)
 
-        # Drop the whole object so the next alloc() does not see a stale slot or
-        # ping-pong reference on the req (which would skip allocation and
-        # silently reuse a freed tensor while the new pool slot leaks).
         req.mamba = None
 
     def clear(self):

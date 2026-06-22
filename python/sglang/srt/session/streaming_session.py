@@ -56,9 +56,6 @@ class SessionSlot:
     req_pool_idx: Optional[int] = None
     kv_committed_len: int = 0
 
-    # Resource objects, presence-tracked: None == this slot does not hold the
-    # resource. An empty slot has all three None; a holding slot always has kv
-    # and cache, and has mamba only for mamba sessions.
     cache: Optional[ReqCacheInfo] = None
     kv: Optional[ReqKvInfo] = None
     mamba: Optional[ReqMambaInfo] = None
@@ -78,14 +75,9 @@ class SessionSlot:
             self.cache = copy.copy(req.cache)
             req.cache = None
 
-        # Copy mamba only when the req holds a mamba slot; otherwise leave the
-        # slot's mamba as-is (None for a non-mamba session).
         if req.mamba is not None:
             self.mamba = copy.copy(req.mamba)
 
-        # Ownership has transferred to the slot. The req no longer holds KV,
-        # cache or mamba state, so clear them all (kv/req_pool_idx in lockstep,
-        # cache on the first turn, mamba as a whole object).
         req.req_pool_idx = None
         req.kv = None
         req.mamba = None
@@ -96,8 +88,6 @@ class SessionSlot:
         req.kv_committed_len = self.kv_committed_len
         req.kv = copy.copy(self.kv)
         req.swa_uuid_for_lock = self.cache.swa_uuid_for_lock
-        # Only hand the req a mamba object when the slot actually holds a mamba
-        # slot; otherwise the req holds no mamba state (req.mamba stays None).
         req.mamba = (
             copy.copy(self.mamba)
             if self.mamba is not None and self.mamba.mamba_pool_idx is not None
@@ -286,13 +276,6 @@ class StreamingSession(BasePrefixCache):
         # req). Next request re-prefills from scratch.
         if isinstance(req.finished_reason, FINISH_ABORT):
             if slot is None:
-                # First-request mid-processing abort: create ephemeral slot
-                # from the req's resource objects so release_session handles
-                # cleanup. cache carries last_node/cache_protected_len so
-                # release_session calls dec_lock_ref; mamba carries the
-                # (possibly extra_buffer ping-pong) slots so _free_slot_mamba
-                # returns them to the mamba pool; otherwise the abort orphans
-                # them.
                 slot = SessionSlot(
                     req_pool_idx=req.req_pool_idx,
                     kv=copy.copy(req.kv),
@@ -300,8 +283,6 @@ class StreamingSession(BasePrefixCache):
                     mamba=copy.copy(req.mamba) if req.mamba is not None else None,
                 )
                 self.slots[session_id] = slot
-                # Slot now owns these resources — drop the req's refs so
-                # the abort fall-through doesn't double-free.
                 req.mamba = None
             slot.kv.kv_allocated_len = max(
                 slot.kv.kv_allocated_len, req.kv_allocated_len

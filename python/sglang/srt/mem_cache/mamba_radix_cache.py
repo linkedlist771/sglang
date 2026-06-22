@@ -518,9 +518,6 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
 
     def cache_finished_req(self, params: CacheFinishParams) -> Optional[FinishResult]:
         """Cache request when it finishes."""
-        # Mamba finish reads mamba slot state off the Req and relocates it via
-        # free_mamba_cache; that harvest is opid9 scope, so it keeps reading the
-        # residual Req carried on the harvest params.
         req = params.req
         is_insert = params.is_insert
         kv_committed_len = params.kv_committed_len

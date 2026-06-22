@@ -171,7 +171,6 @@ def test_first_mid_abort_nukes_ephemeral_slot():
     assert req_to_token_pool.free_slots == [0]
     assert len(allocator.freed) == 1
     assert allocator.freed[0].tolist() == list(range(20))
-    # Resource ownership transferred to (and freed by) release_session.
     assert req.kv is None
     assert req.cache is None
 
@@ -214,7 +213,6 @@ def test_nth_mid_abort_nukes_session_slot():
     # Pool slot returned.
     assert req_to_token_pool.free_slots == [0]
     assert req.req_pool_idx is None
-    # Resource ownership transferred to (and freed by) release_session.
     assert req.kv is None
     assert req.cache is None
 
