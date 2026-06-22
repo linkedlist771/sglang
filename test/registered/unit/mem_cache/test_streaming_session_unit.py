@@ -5,8 +5,8 @@ import torch
 
 from sglang.srt.managers.schedule_batch import (
     FINISH_ABORT,
-    ReqCacheInfo,
     ReqKvInfo,
+    ReqLockedCacheInfo,
     ReqMambaInfo,
 )
 from sglang.srt.mem_cache.base_prefix_cache import MatchResult
@@ -64,12 +64,12 @@ class _FakeReq:
         self.req_pool_idx: int = req_pool_idx
         self.kv_committed_len: int = committed
         self.kv: ReqKvInfo = ReqKvInfo(kv_allocated_len=allocated, swa_evicted_seqlen=0)
-        self.cache: ReqCacheInfo = ReqCacheInfo(
-            cache_protected_len=0,
-            last_node=None,
+        self.locked_cache: Optional[ReqLockedCacheInfo] = ReqLockedCacheInfo(
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
+        self.cache_protected_len = 0
+        self.last_node = None
         self.mamba: Optional[ReqMambaInfo] = None
         self.origin_input_ids = list(range(committed))
         self.output_ids = []
@@ -120,12 +120,12 @@ def test_preabort_detaches_session_and_preserves_slot():
         req_pool_idx=0,
         kv_committed_len=48,
         kv=ReqKvInfo(kv_allocated_len=48, swa_evicted_seqlen=0),
-        cache=ReqCacheInfo(
-            cache_protected_len=16,
-            last_node=None,
+        last_node=None,
+        locked_cache=ReqLockedCacheInfo(
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         ),
+        cache_protected_len=16,
     )
 
     req = _FakeReq("session-a", req_pool_idx=1, committed=1, allocated=1)
@@ -172,7 +172,7 @@ def test_first_mid_abort_nukes_ephemeral_slot():
     assert len(allocator.freed) == 1
     assert allocator.freed[0].tolist() == list(range(20))
     assert req.kv is None
-    assert req.cache is None
+    assert req.locked_cache is None
 
 
 def test_nth_mid_abort_nukes_session_slot():
@@ -191,12 +191,12 @@ def test_nth_mid_abort_nukes_session_slot():
         req_pool_idx=0,
         kv_committed_len=50,
         kv=ReqKvInfo(kv_allocated_len=50, swa_evicted_seqlen=0),
-        cache=ReqCacheInfo(
-            cache_protected_len=0,
-            last_node=None,
+        last_node=None,
+        locked_cache=ReqLockedCacheInfo(
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         ),
+        cache_protected_len=0,
     )
 
     # Mid-processing abort: req has the SESSION slot's pool_idx (restore_to_req ran).
@@ -214,7 +214,7 @@ def test_nth_mid_abort_nukes_session_slot():
     assert req_to_token_pool.free_slots == [0]
     assert req.req_pool_idx is None
     assert req.kv is None
-    assert req.cache is None
+    assert req.locked_cache is None
 
 
 # Shrink tests removed: streaming sessions are append-only after the
