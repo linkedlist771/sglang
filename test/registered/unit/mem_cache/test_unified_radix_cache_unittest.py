@@ -653,6 +653,7 @@ class UnifiedRadixCacheSuite:
         req.cache_protected_len = 0
         req.last_node = None
         req.locked_cache = ReqLockedCacheInfo(
+            last_node=req.last_node,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
@@ -915,6 +916,7 @@ class UnifiedRadixCacheSuite:
         req.last_node = tree.root_node
         req.cache_protected_len = 0
         req.locked_cache = ReqLockedCacheInfo(
+            last_node=req.last_node,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
@@ -953,6 +955,7 @@ class UnifiedRadixCacheSuite:
         req.last_node = tree.root_node
         req.cache_protected_len = 0
         req.locked_cache = ReqLockedCacheInfo(
+            last_node=req.last_node,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
@@ -1000,6 +1003,7 @@ class UnifiedRadixCacheSuite:
         req.last_node = tree.root_node
         req.cache_protected_len = 0
         req.locked_cache = ReqLockedCacheInfo(
+            last_node=req.last_node,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
@@ -1031,6 +1035,7 @@ class UnifiedRadixCacheSuite:
         req.last_node = tree.root_node
         req.cache_protected_len = 0
         req.locked_cache = ReqLockedCacheInfo(
+            last_node=req.last_node,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
@@ -1159,6 +1164,7 @@ class UnifiedRadixCacheSuite:
         req.last_node = tree.root_node
         req.cache_protected_len = 0
         req.locked_cache = ReqLockedCacheInfo(
+            last_node=req.last_node,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
@@ -1846,6 +1852,7 @@ class UnifiedRadixCacheSuite:
         req.last_node = tree.root_node
         req.cache_protected_len = 0
         req.locked_cache = ReqLockedCacheInfo(
+            last_node=req.last_node,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
@@ -1901,6 +1908,7 @@ class UnifiedRadixCacheSuite:
         req.last_node = tree.root_node
         req.cache_protected_len = 0
         req.locked_cache = ReqLockedCacheInfo(
+            last_node=req.last_node,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
