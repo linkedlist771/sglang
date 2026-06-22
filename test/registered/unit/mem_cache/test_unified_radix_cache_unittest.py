@@ -3488,8 +3488,8 @@ class UnifiedRadixCacheSuite:
 
         new_indices, new_node = tree.init_load_back(
             InitLoadBackParams(
-                best_match_node=req.best_match_node,
-                host_hit_length=req.host_hit_length,
+                best_match_node=req.cache_match_snapshot.best_match_node,
+                host_hit_length=req.cache_match_snapshot.host_hit_length,
                 req=req,
             )
         )
@@ -3529,8 +3529,8 @@ class UnifiedRadixCacheSuite:
 
         new_indices, new_node = tree.init_load_back(
             InitLoadBackParams(
-                best_match_node=req.best_match_node,
-                host_hit_length=req.host_hit_length,
+                best_match_node=req.cache_match_snapshot.best_match_node,
+                host_hit_length=req.cache_match_snapshot.host_hit_length,
                 req=req,
             )
         )
@@ -3567,8 +3567,8 @@ class UnifiedRadixCacheSuite:
 
         new_indices, new_node = tree.init_load_back(
             InitLoadBackParams(
-                best_match_node=req.best_match_node,
-                host_hit_length=req.host_hit_length,
+                best_match_node=req.cache_match_snapshot.best_match_node,
+                host_hit_length=req.cache_match_snapshot.host_hit_length,
                 req=req,
                 mem_quota=-1_000_000,
             )
