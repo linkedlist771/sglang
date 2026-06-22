@@ -256,6 +256,7 @@ def create_bench_cache(
         req.cache_protected_len = 0
         req.last_node = None
         req.locked_cache = ReqLockedCacheInfo(
+            last_node=req.last_node,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
@@ -655,6 +656,7 @@ def bench_cache_finished(
         req.kv_committed_freed = False
         if hasattr(lr, "swa_uuid_for_lock"):
             req.locked_cache = ReqLockedCacheInfo(
+                last_node=req.last_node,
                 swa_uuid_for_lock=lr.swa_uuid_for_lock,
                 swa_prefix_lock_released=False,
             )
