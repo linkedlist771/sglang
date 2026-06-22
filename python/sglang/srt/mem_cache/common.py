@@ -83,9 +83,7 @@ def free_swa_out_of_window_slots(
     assert (
         req.cache_protected_len % page_size == 0
     ), "cache_protected_len must be page aligned"
-    req.kv.swa_evicted_seqlen = max(
-        req.kv.swa_evicted_seqlen, req.cache_protected_len
-    )
+    req.kv.swa_evicted_seqlen = max(req.kv.swa_evicted_seqlen, req.cache_protected_len)
 
     # Subtract an extra page_size so the eviction frontier never reaches the
     # radix tree insert boundary (page_floor(seq_len)). This keeps at least one
@@ -655,7 +653,9 @@ def harvest_and_finish_req(
             req.locked_cache.swa_uuid_for_lock if req.locked_cache is not None else None
         ),
         swa_prefix_lock_released=(
-            req.locked_cache.swa_prefix_lock_released if req.locked_cache is not None else False
+            req.locked_cache.swa_prefix_lock_released
+            if req.locked_cache is not None
+            else False
         ),
         rid=req.rid,
         req=req,
