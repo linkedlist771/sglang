@@ -48,7 +48,7 @@ def _make_req(
     )
     req.skip_radix_cache_insert = False
     req.last_node = None
-    req.swa_uuid_for_lock = None
+    req.locked_cache.swa_uuid_for_lock = None
     req.session = None
     req.return_logprob = False
     req.logprob_start_len = -1

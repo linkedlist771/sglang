@@ -673,7 +673,7 @@ class PrefillAdder:
             swa_prefix_lock_released=False,
         )
         if self.is_hybrid_swa:
-            req.swa_uuid_for_lock = result.swa_uuid_for_lock
+            req.locked_cache.swa_uuid_for_lock = result.swa_uuid_for_lock
 
     def add_dllm_staging_req(self, req: Req):
         assert self.dllm_config is not None

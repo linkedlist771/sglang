@@ -283,7 +283,7 @@ class MambaComponent(TreeComponent):
         self, req: Req, token_ids_len: int
     ) -> Optional[int]:
         cache_len = (
-            req.mamba_last_track_seqlen
+            req.mamba.mamba_last_track_seqlen
             if self.enable_mamba_extra_buffer
             else token_ids_len
         )
@@ -299,7 +299,7 @@ class MambaComponent(TreeComponent):
         is_finished: bool,
     ) -> Optional[int]:
         cache_len = (
-            req.mamba_last_track_seqlen
+            req.mamba.mamba_last_track_seqlen
             if self.enable_mamba_extra_buffer
             else token_ids_len
         )
@@ -311,10 +311,12 @@ class MambaComponent(TreeComponent):
                     req
                 )
                 mamba_value = (
-                    req.mamba_ping_pong_track_buffer[keep_idx].unsqueeze(-1).clone()
+                    req.mamba.mamba_ping_pong_track_buffer[keep_idx]
+                    .unsqueeze(-1)
+                    .clone()
                 )
             else:
-                mamba_value = req.mamba_pool_idx.unsqueeze(-1).clone()
+                mamba_value = req.mamba.mamba_pool_idx.unsqueeze(-1).clone()
             insert_params.mamba_value = mamba_value
             return cache_len
         else:
@@ -331,7 +333,7 @@ class MambaComponent(TreeComponent):
             else:
                 mamba_value_donated = self._alloc_mamba_slot()
                 self.cache.req_to_token_pool.mamba_pool.copy_from(
-                    req.mamba_pool_idx.unsqueeze(0), mamba_value_donated
+                    req.mamba.mamba_pool_idx.unsqueeze(0), mamba_value_donated
                 )
             insert_params.mamba_value = mamba_value_donated
             return cache_len
@@ -367,7 +369,7 @@ class MambaComponent(TreeComponent):
                 self.cache.req_to_token_pool.mamba_allocator.free(
                     insert_params.mamba_value
                 )
-            req.mamba_last_track_seqlen = None
+            req.mamba.mamba_last_track_seqlen = None
 
     # ---- HiCache Hooks ----
 
@@ -436,7 +438,7 @@ class MambaComponent(TreeComponent):
                     PoolTransfer(
                         name=PoolName.MAMBA,
                         host_indices=cd.host_value,
-                        device_indices=req.mamba_pool_idx.unsqueeze(0),
+                        device_indices=req.mamba.mamba_pool_idx.unsqueeze(0),
                     )
                 )
 
