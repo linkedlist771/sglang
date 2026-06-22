@@ -813,7 +813,7 @@ class UnifiedRadixCache(KVCacheEventMixin, BasePrefixCache):
                 effective_cache_len = min(effective_cache_len, cl)
 
         if envs.SGLANG_OPT_UNIFIED_CACHE_FREE_OUT_OF_WINDOW_SLOTS.get():
-            insert_params.swa_evicted_seqlen = req.swa_evicted_seqlen
+            insert_params.swa_evicted_seqlen = req.kv.swa_evicted_seqlen
 
         if effective_cache_len <= 0:
             req.prefix_indices = kv_indices_orig.to(dtype=torch.int64, copy=True)
@@ -855,7 +855,7 @@ class UnifiedRadixCache(KVCacheEventMixin, BasePrefixCache):
 
         self.dec_lock_ref(
             req.locked_cache.last_node,
-            DecLockRefParams(swa_uuid_for_lock=req.swa_uuid_for_lock),
+            DecLockRefParams(swa_uuid_for_lock=req.locked_cache.swa_uuid_for_lock),
         )
         lock_result = self.inc_lock_ref(new_last_node)
 
@@ -869,7 +869,7 @@ class UnifiedRadixCache(KVCacheEventMixin, BasePrefixCache):
         req.cache_protected_len = len(new_indices)
         req.last_node = new_last_node
         req.locked_cache.last_node = new_last_node
-        req.swa_uuid_for_lock = lock_result.swa_uuid_for_lock
+        req.locked_cache.swa_uuid_for_lock = lock_result.swa_uuid_for_lock
 
         # cleanup
         for comp in self._components_tuple:

@@ -41,13 +41,13 @@ def _make_req(
     req.cache_protected_len = 0
     req.skip_radix_cache_insert = False
     req.last_node = None
-    req.swa_uuid_for_lock = None
+    req.locked_cache.swa_uuid_for_lock = None
     req.session = None
     req.return_logprob = False
     req.logprob_start_len = -1
     req.positional_embed_overrides = None
     req.extra_key = None
-    req.mamba_pool_idx = None
+    req.mamba.mamba_pool_idx = None
     req.sampling_params = SimpleNamespace(max_new_tokens=128, ignore_eos=False)
     return req
 
