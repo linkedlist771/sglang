@@ -12,7 +12,6 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 import unittest
 import unittest.mock
 from array import array
-from types import SimpleNamespace
 
 import torch
 
