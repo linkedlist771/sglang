@@ -65,6 +65,7 @@ class _FakeReq:
         self.kv_committed_len: int = committed
         self.kv: ReqKvInfo = ReqKvInfo(kv_allocated_len=allocated, swa_evicted_seqlen=0)
         self.locked_cache: Optional[ReqLockedCacheInfo] = ReqLockedCacheInfo(
+            last_node=None,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
@@ -120,8 +121,8 @@ def test_preabort_detaches_session_and_preserves_slot():
         req_pool_idx=0,
         kv_committed_len=48,
         kv=ReqKvInfo(kv_allocated_len=48, swa_evicted_seqlen=0),
-        last_node=None,
         locked_cache=ReqLockedCacheInfo(
+            last_node=None,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         ),
@@ -191,8 +192,8 @@ def test_nth_mid_abort_nukes_session_slot():
         req_pool_idx=0,
         kv_committed_len=50,
         kv=ReqKvInfo(kv_allocated_len=50, swa_evicted_seqlen=0),
-        last_node=None,
         locked_cache=ReqLockedCacheInfo(
+            last_node=None,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         ),
