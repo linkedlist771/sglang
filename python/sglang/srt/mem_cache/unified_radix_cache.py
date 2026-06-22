@@ -783,9 +783,6 @@ class UnifiedRadixCache(KVCacheEventMixin, BasePrefixCache):
     def cache_unfinished_req(
         self, params: CacheUnfinishParams
     ) -> Optional[UnfinishResult]:
-        # The unified component pipeline (prepare/cleanup) still reads the Req
-        # directly; that harvest is opid9/opid10 scope, so it uses the residual
-        # params.req. Scalars are harvested off the params.
         req = params.req
         session_result = self.session.try_cache_unfinished_req(
             req, chunked=params.chunked

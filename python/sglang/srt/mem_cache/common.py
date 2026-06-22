@@ -154,10 +154,6 @@ def maybe_cache_unfinished_req(req: Req, tree_cache: BasePrefixCache, **kwargs):
 def harvest_and_cache_unfinished_req(
     req: Req, tree_cache: BasePrefixCache, chunked: bool = False
 ) -> None:
-    # Harvest the values the cache needs off the Req so the cache no longer
-    # receives a Req. prev_prefix_len (= cache_protected_len) stays on the
-    # orchestrator side; the cache reports the refreshed prefix artifacts via
-    # UnfinishResult (return-not-mutate) and the orchestrator writes them back.
     token_ids = req.get_fill_ids()
     kv_indices = tree_cache.req_to_token_pool.req_to_token[
         req.req_pool_idx, : len(token_ids)
@@ -183,12 +179,6 @@ def harvest_and_cache_unfinished_req(
     )
     unfinish_result = tree_cache.cache_unfinished_req(unfinish_params)
 
-    # Return-not-mutate: the cache reports the refreshed prefix_indices, the new
-    # cache_protected_len and the post-handover lock state; the orchestrator
-    # writes them onto the Req. A None result means the cache fully handled the
-    # request and left the Req untouched (RadixCache disabled / first-turn
-    # streaming delegated to inner). lock_handover gates the lock-state writeback
-    # so skip / early-return paths leave last_node and the SWA lock fields alone.
     if unfinish_result is None:
         return
     if unfinish_result.prefix_indices is not None:

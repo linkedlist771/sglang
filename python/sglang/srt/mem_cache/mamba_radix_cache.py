@@ -628,9 +628,6 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
         self, params: CacheUnfinishParams
     ) -> Optional[UnfinishResult]:
         """Cache request when it is unfinished."""
-        # Mamba reads its slot state off the Req and donates/copies mamba slots;
-        # that harvest is opid9 scope, so it keeps reading the residual Req
-        # carried on the harvest params.
         req = params.req
 
         def _skip_cache_unfinished_req(
@@ -741,8 +738,6 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
         new_prefix_indices = torch.cat(
             [new_indices, kv_indices_orig[len(new_indices) :]]
         )
-        # mamba_last_track_seqlen is mamba slot bookkeeping (opid9 residue), so
-        # it stays a direct Req write via the residual params.req.
         req.mamba_last_track_seqlen = None
 
         return UnfinishResult(

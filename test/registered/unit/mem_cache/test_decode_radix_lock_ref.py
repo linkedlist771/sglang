@@ -43,8 +43,6 @@ from sglang.srt.mem_cache.radix_cache import RadixCache, RadixKey
 
 
 def _unfinish(cache, req, chunked=False):
-    """Harvest params off a (flat) mock Req and run cache_unfinished_req, then
-    write the returned artifacts back onto the Req (return-not-mutate)."""
     token_ids = req.get_fill_ids()
     kv_indices = cache.req_to_token_pool.req_to_token[
         req.req_pool_idx, : len(token_ids)
