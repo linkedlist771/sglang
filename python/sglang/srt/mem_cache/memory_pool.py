@@ -297,6 +297,9 @@ class ReqToTokenPool:
         assert req.req_pool_idx is not None, "request must have req_pool_idx"
         self.free_slots.append(req.req_pool_idx)
         req.req_pool_idx = None
+        # TODO(th4): clearing owned-kv ownership (req.kv) belongs in the owned-kv
+        # subsystem, not in the low-level ReqToTokenPool; kept here in the
+        # presence op to preserve equivalence.
         req.kv = None
 
     def clear(self):
@@ -949,6 +952,9 @@ class HybridReqToTokenPool(ReqToTokenPool):
                 )
             self.mamba_allocator.free(mamba_ping_pong_track_buffer_to_free)
 
+        # TODO(th4): clearing owned-mamba ownership (req.mamba) belongs in the
+        # mamba subsystem, not in the low-level ReqToTokenPool; kept here in the
+        # presence op to preserve equivalence.
         req.mamba = None
 
     def clear(self):
