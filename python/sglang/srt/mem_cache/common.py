@@ -173,7 +173,9 @@ def harvest_and_cache_unfinished_req(
             req.locked_cache.swa_uuid_for_lock if req.locked_cache is not None else None
         ),
         swa_prefix_lock_released=(
-            req.locked_cache.swa_prefix_lock_released if req.locked_cache is not None else False
+            req.locked_cache.swa_prefix_lock_released
+            if req.locked_cache is not None
+            else False
         ),
         req=req,
     )
@@ -190,7 +192,9 @@ def harvest_and_cache_unfinished_req(
         req.locked_cache.last_node = unfinish_result.last_node
         req.locked_cache.swa_uuid_for_lock = unfinish_result.swa_uuid_for_lock
         if unfinish_result.swa_prefix_lock_released is not None:
-            req.locked_cache.swa_prefix_lock_released = unfinish_result.swa_prefix_lock_released
+            req.locked_cache.swa_prefix_lock_released = (
+                unfinish_result.swa_prefix_lock_released
+            )
 
 
 def write_cache_indices(
