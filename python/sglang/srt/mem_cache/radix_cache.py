@@ -465,8 +465,6 @@ class RadixCache(KVCacheEventMixin, BasePrefixCache):
             result = self.insert(
                 InsertParams(key=radix_key, value=values, priority=params.priority)
             )
-            # The duplicates already in the tree are freed by the orchestrator
-            # via FinishResult.prefix_len (return-not-mutate).
             prefix_len = result.prefix_len
         else:
             prefix_len = key_len
@@ -475,8 +473,6 @@ class RadixCache(KVCacheEventMixin, BasePrefixCache):
         if params.last_node is not None:
             self.dec_lock_ref(params.last_node)
 
-        # The orchestrator owns the dup-free [owned.start, prefix_len) and the
-        # unaligned tail-free [key_len:].
         return FinishResult(prefix_len=prefix_len, key_len=key_len)
 
     def cache_unfinished_req(

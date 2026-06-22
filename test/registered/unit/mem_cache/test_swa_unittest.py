@@ -38,7 +38,6 @@ class _DummyReq:
 
 
 def _finish(tree, req, is_insert=True):
-    """Build harvest params off a flat mock Req and run cache_finished_req."""
     kv_committed_len = req._kv_committed_len
     kv_indices = tree.req_to_token_pool.req_to_token[
         req.req_pool_idx, :kv_committed_len

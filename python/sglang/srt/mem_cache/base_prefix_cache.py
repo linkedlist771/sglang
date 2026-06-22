@@ -49,7 +49,6 @@ class MatchPrefixParams:
     cow_mamba: bool = False
     req: Optional[Req] = None
 
-    # LMCache specific
     rid: Optional[str] = None
 
 
@@ -74,114 +73,59 @@ class InsertParams:
 
 @dataclasses.dataclass
 class CacheFinishParams:
-    """Harvested parameters for cache_finished_req across cache types.
-
-    The orchestrator harvests every value off the Req / ReqKvInfo / ReqCacheInfo
-    and passes this dataclass so the cache no longer receives a Req.
-    """
-
-    # token_ids = (origin_input_ids + output_ids)[:kv_committed_len], harvested
     token_ids: Optional[Any] = None
     extra_key: Optional[Any] = None
-    # kv_indices harvested by the orchestrator: req_to_token[req_pool_idx, :kv_committed_len]
     kv_indices: Optional[torch.Tensor] = None
     kv_committed_len: int = 0
 
     prev_prefix_len: int = 0
-    # len(req.prefix_indices), harvested for radix_cache_cpp which derives its
-    # own old_prefix_len from it (not cache_protected_len).
     prefix_indices_len: int = 0
     swa_evicted_seqlen: int = 0
     priority: int = 0
     is_insert: bool = True
 
-    # Cache lock state (cache-owned, lives on ReqCacheInfo), harvested for
-    # dec_lock_ref so the cache does not read it off the Req.
     last_node: Any = None
     swa_uuid_for_lock: Optional[int] = None
     swa_prefix_lock_released: bool = False
 
-    # LMCache specific
     rid: Optional[str] = None
 
-    # Mamba-only residual Req access (opid9 follow-up relocates the mamba slot
-    # harvest + free_mamba_cache off Req; until then mamba finish reads it here).
     req: Optional[Req] = None
 
 
 @dataclasses.dataclass
 class FinishResult:
-    """Result of a cache_finished_req operation.
-
-    The cache returns the boundaries it computed; the orchestrator owns the
-    actual frees (return-not-mutate). ``prefix_len`` is the duplicate boundary
-    already present in the tree; ``key_len`` is the effective page-aligned key
-    length. Both are absolute offsets into the harvested kv_indices.
-    """
-
     prefix_len: Optional[int] = None
     key_len: Optional[int] = None
 
 
 @dataclasses.dataclass
 class CacheUnfinishParams:
-    """Harvested parameters for cache_unfinished_req across cache types.
-
-    Mirrors CacheFinishParams: the orchestrator harvests every value off the
-    Req / ReqKvInfo / ReqCacheInfo and passes this dataclass so the cache no
-    longer receives a Req on the unfinished path.
-    """
-
-    # token_ids = req.get_fill_ids(), harvested
     token_ids: Optional[Any] = None
     extra_key: Optional[Any] = None
-    # kv_indices harvested by the orchestrator: req_to_token[req_pool_idx, :len(token_ids)]
     kv_indices: Optional[torch.Tensor] = None
-    # req_pool_idx is carried so the cache can write the refreshed prefix row
-    # back into the lower ReqToTokenPool (a downward write, not a Req access).
     req_pool_idx: Optional[int] = None
 
     prev_prefix_len: int = 0
-    # len(req.prefix_indices), harvested for radix_cache_cpp which derives its
-    # own old_prefix_len from it (not cache_protected_len).
     prefix_indices_len: int = 0
     swa_evicted_seqlen: int = 0
     priority: int = 0
     chunked: bool = False
 
-    # Cache lock state (cache-owned, lives on ReqCacheInfo), harvested so the
-    # cache does the lock handover without reading it off the Req.
     last_node: Any = None
     swa_uuid_for_lock: Optional[int] = None
     swa_prefix_lock_released: bool = False
 
-    # Residual Req access for backends whose unfinished path still reads the Req
-    # directly (mamba slot harvest -> opid9; unified component pipeline +
-    # streaming session -> opid9/opid10). Plain RadixCache/SWA/cpp ignore it.
     req: Optional[Req] = None
 
 
 @dataclasses.dataclass
 class UnfinishResult:
-    """Result of a cache_unfinished_req operation.
-
-    The cache returns the transient match artifacts (return-not-mutate); the
-    orchestrator writes them back onto the Req and performs the prefix-row
-    writeback into the lower ReqToTokenPool. The lock handover (dec old + inc
-    new) stays inside the cache because it is not atomic across an API
-    boundary, so the new lock state is reported here as already-applied values.
-    """
-
     prefix_indices: Optional[torch.Tensor] = None
     cache_protected_len: Optional[int] = None
-    # lock_handover gates the last_node / swa_uuid_for_lock writeback: only the
-    # full insert paths perform the dec-old + inc-new handover, so disabled and
-    # skip paths leave these fields untouched on the Req.
     lock_handover: bool = False
     last_node: Any = None
     swa_uuid_for_lock: Optional[int] = None
-    # None means "leave req.swa_prefix_lock_released unchanged"; legacy SWA
-    # resets it to False after the lock handover.
     swa_prefix_lock_released: Optional[bool] = None
 
 
@@ -266,7 +210,6 @@ class InitLoadBackParams:
     mem_quota: Optional[int] = None
     req: Optional[Req] = None
 
-    # LMCache specific
     rid: Optional[str] = None
 
 
@@ -295,11 +238,6 @@ class MatchResult(NamedTuple):
         mamba_branching_seqlen: The mamba radix cache branching point, which is the longest
                                 page-aligned position that could've been cache hit if there
                                 exists a mamba state.
-        mamba_cow_src: The matched mamba pool index (copy-on-write source) the
-                                caller may copy from. Pure query result: the cache
-                                neither allocates a destination slot nor writes the
-                                Req. The orchestrator allocates the destination in
-                                the owned-KV alloc phase and records the COW.
     """
 
     device_indices: torch.Tensor
