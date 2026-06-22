@@ -12,6 +12,7 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 import unittest
 import unittest.mock
 from array import array
+from types import SimpleNamespace
 
 import torch
 
@@ -32,13 +33,12 @@ class _StubReq:
         self.output_ids = array("q")
         self.extra_key = None
         self.prefix_indices = None
-        self.last_node = None
         self.last_host_node = None
         self.best_match_node = None
         self.host_hit_length = None
         self.num_matched_prefix_tokens = 0
-        self.mamba_branching_seqlen = None
-        self.cache_protected_len = None
+        self.cache = SimpleNamespace(last_node=None, cache_protected_len=None)
+        self.mamba = SimpleNamespace(mamba_branching_seqlen=None)
 
     def _compute_max_prefix_len(self, input_len):
         return max(input_len - 1, 0)

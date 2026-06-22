@@ -532,7 +532,7 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
 
         if is_insert:
             cache_len = (
-                req.mamba_last_track_seqlen
+                req.mamba.mamba_last_track_seqlen
                 if self.enable_mamba_extra_buffer
                 else len(token_ids)
             )
@@ -563,14 +563,14 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
                 mamba_ping_pong_track_buffer_to_keep = (
                     self.req_to_token_pool.get_mamba_ping_pong_keep_idx(req)
                 )
-                src_active = req.mamba_ping_pong_track_buffer[
+                src_active = req.mamba.mamba_ping_pong_track_buffer[
                     mamba_ping_pong_track_buffer_to_keep
                 ].unsqueeze(-1)
                 assert src_active.item() != -1, (
                     f"Cached mamba slot is -1: keep_idx={mamba_ping_pong_track_buffer_to_keep}, "
-                    f"buf={req.mamba_ping_pong_track_buffer.tolist()}, "
-                    f"next_track_idx={req.mamba_next_track_idx}, "
-                    f"last_track_seqlen={req.mamba_last_track_seqlen}, "
+                    f"buf={req.mamba.mamba_ping_pong_track_buffer.tolist()}, "
+                    f"next_track_idx={req.mamba.mamba_next_track_idx}, "
+                    f"last_track_seqlen={req.mamba.mamba_last_track_seqlen}, "
                     f"rid={req.rid}"
                 )
                 if self.int8_ckpt_pool is not None:
@@ -582,10 +582,10 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
             else:
                 if self.int8_ckpt_pool is not None:
                     mamba_value = self._commit_int8_checkpoint(
-                        req.mamba_pool_idx.unsqueeze(-1)
+                        req.mamba.mamba_pool_idx.unsqueeze(-1)
                     )
                 else:
-                    mamba_value = req.mamba_pool_idx.unsqueeze(-1).clone()
+                    mamba_value = req.mamba.mamba_pool_idx.unsqueeze(-1).clone()
                 mamba_ping_pong_track_buffer_to_keep = None
 
             result = self.insert(
@@ -601,7 +601,9 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
                 # state already cached -> the int8 slot we just allocated is a duplicate
                 self.int8_ckpt_pool.free(mamba_value)
         else:
-            self.token_to_kv_pool_allocator.free(kv_indices[req.cache_protected_len :])
+            self.token_to_kv_pool_allocator.free(
+                kv_indices[req.cache_protected_len :]
+            )
             mamba_exist = True
 
         if mamba_exist:
@@ -639,7 +641,7 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
 
         token_ids = req.get_fill_ids()
         cache_len = (
-            req.mamba_last_track_seqlen
+            req.mamba.mamba_last_track_seqlen
             if self.enable_mamba_extra_buffer
             else len(token_ids)
         )
@@ -680,7 +682,7 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
                 self.req_to_token_pool.mamba_allocator.free(src_active)
             else:
                 mamba_value_donated = self._commit_int8_checkpoint(
-                    req.mamba_pool_idx.view(-1)
+                    req.mamba.mamba_pool_idx.view(-1)
                 )
         elif self.enable_mamba_extra_buffer:
             new_slot = self._alloc_mamba_slot()
@@ -690,7 +692,7 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
         else:
             mamba_value_donated = self._alloc_mamba_slot()
             self.req_to_token_pool.mamba_pool.copy_from(
-                req.mamba_pool_idx.unsqueeze(0), mamba_value_donated
+                req.mamba.mamba_pool_idx.unsqueeze(0), mamba_value_donated
             )
 
         result = self.insert(
@@ -739,7 +741,7 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
             [new_indices, kv_indices_orig[len(new_indices) :]]
         )
         req.cache_protected_len = len(new_indices)
-        req.mamba_last_track_seqlen = None
+        req.mamba.mamba_last_track_seqlen = None
         req.last_node = new_last_node
         req.locked_cache.last_node = new_last_node
 

@@ -245,14 +245,14 @@ def test_trim_overshoot_postcondition():
     req = _FakeReq("session-a", req_pool_idx=0, committed=40, allocated=44)
     req.origin_input_ids = list(range(26))
     req.output_ids = list(range(14))
-    req.swa_evicted_seqlen = 42
+    req.kv.swa_evicted_seqlen = 42
 
     tree_cache._trim_overshoot(req, finished_len=12)
 
     target = 38
     assert req.kv_committed_len == target
-    assert req.kv_allocated_len == target
-    assert req.swa_evicted_seqlen == target
+    assert req.kv.kv_allocated_len == target
+    assert req.kv.swa_evicted_seqlen == target
     assert len(req.output_ids) == 12
     # Tail [38, 44) freed by _free_kv_aligned.
     assert len(allocator.freed) == 1

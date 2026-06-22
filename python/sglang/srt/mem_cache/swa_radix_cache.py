@@ -466,7 +466,7 @@ class SWARadixCache(KVCacheEventMixin, BasePrefixCache):
                     key=radix_key,
                     value=values,
                     prev_prefix_len=old_prefix_len,
-                    swa_evicted_seqlen=req.swa_evicted_seqlen,
+                    swa_evicted_seqlen=req.kv.swa_evicted_seqlen,
                 )
             )
         else:
@@ -481,8 +481,8 @@ class SWARadixCache(KVCacheEventMixin, BasePrefixCache):
         if req.locked_cache is not None:
             self.dec_lock_ref(
                 req.locked_cache.last_node,
-                DecLockRefParams(swa_uuid_for_lock=req.swa_uuid_for_lock),
-                skip_swa=req.swa_prefix_lock_released,
+                DecLockRefParams(swa_uuid_for_lock=req.locked_cache.swa_uuid_for_lock),
+                skip_swa=req.locked_cache.swa_prefix_lock_released,
             )
             req.locked_cache = None
 
@@ -537,10 +537,10 @@ class SWARadixCache(KVCacheEventMixin, BasePrefixCache):
 
         self.dec_lock_ref(
             req.locked_cache.last_node,
-            DecLockRefParams(swa_uuid_for_lock=req.swa_uuid_for_lock),
-            skip_swa=req.swa_prefix_lock_released,
+            DecLockRefParams(swa_uuid_for_lock=req.locked_cache.swa_uuid_for_lock),
+            skip_swa=req.locked_cache.swa_prefix_lock_released,
         )
-        req.swa_prefix_lock_released = False
+        req.locked_cache.swa_prefix_lock_released = False
         result = self.inc_lock_ref(new_last_node)
         swa_uuid_for_lock = result.swa_uuid_for_lock
 
@@ -553,7 +553,7 @@ class SWARadixCache(KVCacheEventMixin, BasePrefixCache):
             req.prefix_indices = new_indices
         req.last_node = new_last_node
         req.locked_cache.last_node = new_last_node
-        req.swa_uuid_for_lock = swa_uuid_for_lock
+        req.locked_cache.swa_uuid_for_lock = swa_uuid_for_lock
 
     def pretty_print(self) -> None:
         self._print_helper(self.root_node, 0)

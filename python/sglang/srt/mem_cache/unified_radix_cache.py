@@ -763,13 +763,15 @@ class UnifiedRadixCache(KVCacheEventMixin, BasePrefixCache):
             # Free unaligned tail
             self.token_to_kv_pool_allocator.free(kv_indices[page_aligned_len:])
         else:
-            self.token_to_kv_pool_allocator.free(kv_indices[req.cache_protected_len :])
+            self.token_to_kv_pool_allocator.free(
+                kv_indices[req.cache_protected_len :]
+            )
 
         if req.locked_cache is not None:
             self.dec_lock_ref(
                 req.locked_cache.last_node,
-                DecLockRefParams(swa_uuid_for_lock=req.swa_uuid_for_lock),
-                skip_swa=req.swa_prefix_lock_released,
+                DecLockRefParams(swa_uuid_for_lock=req.locked_cache.swa_uuid_for_lock),
+                skip_swa=req.locked_cache.swa_prefix_lock_released,
             )
             req.locked_cache = None
 
@@ -859,7 +861,7 @@ class UnifiedRadixCache(KVCacheEventMixin, BasePrefixCache):
 
         self.dec_lock_ref(
             req.locked_cache.last_node,
-            DecLockRefParams(swa_uuid_for_lock=req.swa_uuid_for_lock),
+            DecLockRefParams(swa_uuid_for_lock=req.locked_cache.swa_uuid_for_lock),
         )
         lock_result = self.inc_lock_ref(new_last_node)
 
@@ -873,7 +875,7 @@ class UnifiedRadixCache(KVCacheEventMixin, BasePrefixCache):
         req.cache_protected_len = len(new_indices)
         req.last_node = new_last_node
         req.locked_cache.last_node = new_last_node
-        req.swa_uuid_for_lock = lock_result.swa_uuid_for_lock
+        req.locked_cache.swa_uuid_for_lock = lock_result.swa_uuid_for_lock
 
         # cleanup
         for comp in self._components_tuple:
