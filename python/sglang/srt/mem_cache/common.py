@@ -72,7 +72,7 @@ def harvest_and_cache_unfinished_req(
         swa_evicted_seqlen=req.kv.swa_evicted_seqlen if req.kv is not None else 0,
         priority=getattr(req, "priority", 0) or 0,
         chunked=chunked,
-        last_node=req.last_node if req.locked_cache is not None else None,
+        last_node=req.locked_cache.last_node if req.locked_cache is not None else None,
         swa_uuid_for_lock=(
             req.swa_uuid_for_lock if req.locked_cache is not None else None
         ),
@@ -91,6 +91,7 @@ def harvest_and_cache_unfinished_req(
         req.cache_protected_len = unfinish_result.cache_protected_len
     if unfinish_result.lock_handover and req.locked_cache is not None:
         req.last_node = unfinish_result.last_node
+        req.locked_cache.last_node = unfinish_result.last_node
         req.swa_uuid_for_lock = unfinish_result.swa_uuid_for_lock
         if unfinish_result.swa_prefix_lock_released is not None:
             req.swa_prefix_lock_released = unfinish_result.swa_prefix_lock_released
@@ -114,7 +115,7 @@ def harvest_and_finish_req(
         swa_evicted_seqlen=req.kv.swa_evicted_seqlen if req.kv is not None else 0,
         priority=getattr(req, "priority", 0) or 0,
         is_insert=is_insert and not getattr(req, "skip_radix_cache_insert", False),
-        last_node=req.last_node if req.locked_cache is not None else None,
+        last_node=req.locked_cache.last_node if req.locked_cache is not None else None,
         swa_uuid_for_lock=(
             req.swa_uuid_for_lock if req.locked_cache is not None else None
         ),
