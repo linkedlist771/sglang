@@ -476,6 +476,9 @@ class SWARadixCache(KVCacheEventMixin, BasePrefixCache):
         self.token_to_kv_pool_allocator.free(kv_indices[page_aligned_len:])
 
         # Remove req slot release the cache lock
+        assert (
+            params.last_node is not None
+        ), "cache_finished_req expects the req to still hold its cache lock"
         self.dec_lock_ref(
             params.last_node,
             DecLockRefParams(swa_uuid_for_lock=params.swa_uuid_for_lock),

@@ -767,6 +767,9 @@ class UnifiedRadixCache(KVCacheEventMixin, BasePrefixCache):
         else:
             self.token_to_kv_pool_allocator.free(kv_indices[prev_prefix_len:])
 
+        assert (
+            params.last_node is not None
+        ), "cache_finished_req expects the req to still hold its cache lock"
         self.dec_lock_ref(
             params.last_node,
             DecLockRefParams(swa_uuid_for_lock=params.swa_uuid_for_lock),

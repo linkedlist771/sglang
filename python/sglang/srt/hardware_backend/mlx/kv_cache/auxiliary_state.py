@@ -229,22 +229,19 @@ class MlxAuxiliaryStateReqToTokenPool(ReqToTokenPool):
 
         auxiliary_state_indices = []
         for req in reqs:
-            if req.mamba is not None and req.mamba.mamba_pool_idx is not None:
+            if req.mamba is not None:
                 mid = req.mamba.mamba_pool_idx
             else:
                 allocated = self.auxiliary_state_pool.alloc(1)
                 assert allocated is not None, "Not enough MLX auxiliary state slots"
                 mid = allocated[0]
-                if req.mamba is None:
-                    req.mamba = ReqMambaInfo(
-                        mamba_pool_idx=mid,
-                        mamba_ping_pong_track_buffer=None,
-                        mamba_next_track_idx=None,
-                        mamba_last_track_seqlen=None,
-                        mamba_branching_seqlen=None,
-                    )
-                else:
-                    req.mamba.mamba_pool_idx = mid
+                req.mamba = ReqMambaInfo(
+                    mamba_pool_idx=mid,
+                    mamba_ping_pong_track_buffer=None,
+                    mamba_next_track_idx=None,
+                    mamba_last_track_seqlen=None,
+                    mamba_branching_seqlen=None,
+                )
             if req.mamba_branching_seqlen_pending is not None:
                 req.mamba.mamba_branching_seqlen = req.mamba_branching_seqlen_pending
             auxiliary_state_indices.append(mid.to(dtype=torch.int32))
@@ -265,8 +262,7 @@ class MlxAuxiliaryStateReqToTokenPool(ReqToTokenPool):
     def free_mamba_cache(self, req, mamba_ping_pong_track_buffer_to_keep=None):
         if req.mamba is None:
             return
-        if req.mamba.mamba_pool_idx is not None:
-            self.auxiliary_state_pool.free(req.mamba.mamba_pool_idx.unsqueeze(0))
+        self.auxiliary_state_pool.free(req.mamba.mamba_pool_idx.unsqueeze(0))
         track_buffer = req.mamba.mamba_ping_pong_track_buffer
         if track_buffer is not None:
             if mamba_ping_pong_track_buffer_to_keep is None:
@@ -313,8 +309,6 @@ class MlxAuxiliaryStateComponent(MambaComponent):
         track_len = req.mamba.mamba_last_track_seqlen
         if track_buffer is not None and track_len is not None:
             return track_buffer[0].unsqueeze(-1).clone(), True
-        if req.mamba.mamba_pool_idx is None:
-            return None, False
         return req.mamba.mamba_pool_idx.unsqueeze(-1).clone(), False
 
     def prepare_for_caching_req(

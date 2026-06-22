@@ -621,6 +621,9 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
                 mamba_ping_pong_track_buffer_to_keep=mamba_ping_pong_track_buffer_to_keep,
             )
 
+        assert (
+            params.last_node is not None
+        ), "cache_finished_req expects the req to still hold its cache lock"
         self.dec_lock_ref(params.last_node)
         return None
 
