@@ -769,8 +769,6 @@ class Req(ReqDllmMixin):
 
         # For req-level memory management
         self.kv_committed_len = 0
-        # Owned-KV info. None == this req holds no KV allocation (in lockstep
-        # with req_pool_idx). Created on alloc, cleared on free.
         self.kv: Optional[ReqKvInfo] = None
 
         # for corss-endoder model
@@ -812,9 +810,6 @@ class Req(ReqDllmMixin):
 
         # Memory pool info
         self.req_pool_idx: Optional[int] = None
-        # Owned-mamba info. None == this req holds no mamba pool slot (always
-        # None for non-mamba models). Created when a mamba slot is first
-        # allocated / COW'd, cleared on free.
         self.mamba: Optional[ReqMambaInfo] = None
         # Deferred COW: source mamba pool index from radix cache node (copy on forward stream)
         self.mamba_cow_src_index: Optional[torch.Tensor] = None
@@ -868,9 +863,6 @@ class Req(ReqDllmMixin):
         self.extend_input_len = 0
         # The relative logprob_start_len in an extend batch
         self.extend_logprob_start_len = 0
-        # Device-tree/borrow cache info. None == this req holds no cache state
-        # (has not gone through prefix-match yet, or was retracted). Created at
-        # the prefix-match point, cleared on retract and streaming is_first save.
         self.cache: Optional[ReqCacheInfo] = None
         self.last_host_node: Any = None
         self.best_match_node: Any = None
@@ -1286,9 +1278,6 @@ class Req(ReqDllmMixin):
                 match_result.swa_host_hit_length,
                 match_result.mamba_host_hit_length,
             )
-            # mamba_branching_seqlen only applies to a req that holds a mamba
-            # slot (created by the COW inside the match_prefix above). Setting it
-            # on a mamba-less req would write through a None self.mamba.
             if (
                 match_result.mamba_branching_seqlen is not None
                 and self.mamba is not None
@@ -1539,10 +1528,6 @@ class Req(ReqDllmMixin):
         self.prefix_indices = torch.empty((0,), dtype=torch.int64)
         self.routed_experts = None
         self.indexer_topk = None
-        # cache is freed before reset_for_retract runs: retract calls
-        # release_kv_cache -> cache_finished_req (reads the cache fields and
-        # dec_lock_ref frees the borrow) first, so drop the whole object; a
-        # fresh one is created at the next prefix-match.
         self.cache = None
         self.num_matched_prefix_tokens = 0
         self.extend_input_len = 0
@@ -1553,17 +1538,9 @@ class Req(ReqDllmMixin):
         self.temp_input_top_logprobs_idx = None
         self.extend_logprob_start_len = 0
         self.inflight_middle_chunks = 0
-        # mamba is already None here: retract frees the mamba slot
-        # (release_kv_cache -> cache_finished_req/free_mamba_cache forces a
-        # mamba free) before reset_for_retract runs, so a fresh ReqMambaInfo is
-        # created at the next alloc. These plain attributes are not part of it.
         self.mamba_cow_src_index = None
         self.mamba_needs_clear = False
         self.already_computed = 0
-        # kv is already None here: retract frees KV (release_kv_cache ->
-        # ReqToTokenPool.free) before reset_for_retract runs, so the owned-KV
-        # fields live on a fresh ReqKvInfo created at the next alloc. Only the
-        # bare committed length is reset.
         self.kv_committed_len = 0
         self.extend_batch_idx = 0
         self.decode_batch_idx = 0
