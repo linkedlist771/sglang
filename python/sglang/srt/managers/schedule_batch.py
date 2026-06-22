@@ -1537,10 +1537,12 @@ class Req(ReqDllmMixin):
         self.temp_input_top_logprobs_idx = None
         self.extend_logprob_start_len = 0
         self.inflight_middle_chunks = 0
+        assert self.mamba is None, "expect it is already released"
         self.mamba_cow_src_index = None
         self.mamba_branching_seqlen_pending = None
         self.mamba_needs_clear = False
         self.already_computed = 0
+        assert self.kv is None, "expect it is already released"
         self.kv_committed_len = 0
         self.extend_batch_idx = 0
         self.decode_batch_idx = 0
