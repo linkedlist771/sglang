@@ -20,7 +20,11 @@ from sglang.srt.disaggregation.kv_events import (
 )
 from sglang.srt.environ import envs
 from sglang.srt.layers.attention.fla.chunk_delta_h import CHUNK_SIZE as FLA_CHUNK_SIZE
-from sglang.srt.managers.schedule_batch import Req, ReqCacheInfo
+from sglang.srt.managers.schedule_batch import (
+    Req,
+    ReqCacheMatchSnapshot,
+    ReqLockedCacheInfo,
+)
 from sglang.srt.mem_cache.allocator import TokenToKVPoolAllocator
 from sglang.srt.mem_cache.allocator.swa import SWATokenToKVPoolAllocator
 from sglang.srt.mem_cache.base_prefix_cache import (
@@ -647,9 +651,9 @@ class UnifiedRadixCacheSuite:
         )
         self._rid += 1
         req_to_token_pool.alloc([req])
-        req.cache = ReqCacheInfo(
-            cache_protected_len=0,
-            last_node=None,
+        req.cache_protected_len = 0
+        req.last_node = None
+        req.locked_cache = ReqLockedCacheInfo(
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
@@ -658,11 +662,14 @@ class UnifiedRadixCacheSuite:
     def _apply_match_to_req(self, req, match):
         req.prefix_indices = match.device_indices
         req.last_node = match.last_device_node
-        req.last_host_node = match.last_host_node
-        req.best_match_node = match.best_match_node
-        req.host_hit_length = match.host_hit_length
-        req.swa_host_hit_length = match.swa_host_hit_length
-        req.mamba_host_hit_length = match.mamba_host_hit_length
+        req.cache_match_snapshot = ReqCacheMatchSnapshot(
+            num_matched_prefix_tokens=0,
+            host_hit_length=match.host_hit_length,
+            swa_host_hit_length=match.swa_host_hit_length,
+            mamba_host_hit_length=match.mamba_host_hit_length,
+            last_host_node=match.last_host_node,
+            best_match_node=match.best_match_node,
+        )
 
     def _make_seq(self, start: int, num_pages: int) -> list[int]:
         """Page-aligned token sequence of num_pages pages."""
@@ -908,7 +915,10 @@ class UnifiedRadixCacheSuite:
         req.kv_committed_len = kv_len
         req.last_node = tree.root_node
         req.cache_protected_len = 0
-        req.swa_uuid_for_lock = None
+        req.locked_cache = ReqLockedCacheInfo(
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
         req.extra_key = None
         req.full_untruncated_fill_ids = array("q", input_ids + output_ids)
         req.fill_len = len(req.full_untruncated_fill_ids)
@@ -943,7 +953,10 @@ class UnifiedRadixCacheSuite:
         req.kv_allocated_len = kv_len
         req.last_node = tree.root_node
         req.cache_protected_len = 0
-        req.swa_uuid_for_lock = None
+        req.locked_cache = ReqLockedCacheInfo(
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
         req.extra_key = None
         if self.cfg.has_mamba:
             req.mamba_last_track_seqlen = kv_len
@@ -987,7 +1000,10 @@ class UnifiedRadixCacheSuite:
         req.kv_committed_len = kv_len
         req.last_node = tree.root_node
         req.cache_protected_len = 0
-        req.swa_uuid_for_lock = None
+        req.locked_cache = ReqLockedCacheInfo(
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
         req.extra_key = None
         req.full_untruncated_fill_ids = array("q", tokens)
         req.fill_len = len(req.full_untruncated_fill_ids)
@@ -1015,7 +1031,10 @@ class UnifiedRadixCacheSuite:
         req.kv_committed_len = kv_len
         req.last_node = tree.root_node
         req.cache_protected_len = 0
-        req.swa_uuid_for_lock = None
+        req.locked_cache = ReqLockedCacheInfo(
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
         req.extra_key = None
         if self.cfg.has_mamba:
             req.mamba_last_track_seqlen = kv_len
@@ -1140,7 +1159,10 @@ class UnifiedRadixCacheSuite:
         req.kv_committed_len = kv_len
         req.last_node = tree.root_node
         req.cache_protected_len = 0
-        req.swa_uuid_for_lock = None
+        req.locked_cache = ReqLockedCacheInfo(
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
         req.extra_key = None
         req.full_untruncated_fill_ids = array("q", input_ids)
         req.fill_len = len(req.full_untruncated_fill_ids)
@@ -1824,7 +1846,10 @@ class UnifiedRadixCacheSuite:
         req.kv_committed_len = pre_len
         req.last_node = tree.root_node
         req.cache_protected_len = 0
-        req.swa_uuid_for_lock = None
+        req.locked_cache = ReqLockedCacheInfo(
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
         req.extra_key = None
         req.swa_evicted_seqlen = 0
 
@@ -1876,7 +1901,10 @@ class UnifiedRadixCacheSuite:
         req.kv_committed_len = pre_len
         req.last_node = tree.root_node
         req.cache_protected_len = 0
-        req.swa_uuid_for_lock = None
+        req.locked_cache = ReqLockedCacheInfo(
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
         req.extra_key = None
         req.swa_evicted_seqlen = 0
 
