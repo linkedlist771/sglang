@@ -689,8 +689,6 @@ class UnifiedRadixCacheSuite:
         return full_indices[:need_size]
 
     def _finish(self, tree, req, is_insert=True):
-        """Harvest finish params off a real Req and drive cache_finished_req
-        through the orchestrator helper (return-not-mutate frees included)."""
         harvest_and_finish_req(req, tree, is_insert=is_insert)
 
     def _insert(self, tree, allocator, req_to_token_pool, tokens, priority=0):
