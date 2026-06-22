@@ -564,7 +564,7 @@ class SWAComponent(TreeComponent):
         is_finished: bool,
     ) -> Optional[int]:
         if is_finished:
-            insert_params.swa_evicted_seqlen = req.swa_evicted_seqlen
+            insert_params.swa_evicted_seqlen = req.kv.swa_evicted_seqlen
         return None
 
     # ---- HiCache Hooks ----
