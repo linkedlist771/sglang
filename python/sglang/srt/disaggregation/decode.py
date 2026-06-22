@@ -59,7 +59,11 @@ from sglang.srt.disaggregation.utils import (
 )
 from sglang.srt.environ import envs
 from sglang.srt.layers.dp_attention import get_attention_tp_size
-from sglang.srt.managers.schedule_batch import FINISH_ABORT, ReqCacheInfo, ScheduleBatch
+from sglang.srt.managers.schedule_batch import (
+    FINISH_ABORT,
+    ReqLockedCacheInfo,
+    ScheduleBatch,
+)
 from sglang.srt.managers.schedule_policy import match_prefix_for_req
 from sglang.srt.managers.utils import GenerationBatchResult
 from sglang.srt.mem_cache.allocator import BaseTokenToKVPoolAllocator
@@ -512,6 +516,10 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
         )
         # Always lock to match aggregated scheduling behavior
         self.tree_cache.inc_lock_ref(result.last_device_node)
+        req.locked_cache = ReqLockedCacheInfo(
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
         return self._build_decode_prefix_match(req, result)
 
     def _resolve_prefill_dp_rank(self, req: Req) -> Optional[int]:
@@ -922,10 +930,12 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
             ):
                 if prefix_len > 0:
                     self.tree_cache.dec_lock_ref(decode_req.req.last_node)
+                decode_req.req.locked_cache = None
                 break
             if required_tokens_for_request > full_allocatable_tokens:
                 if prefix_len > 0:
                     self.tree_cache.dec_lock_ref(decode_req.req.last_node)
+                decode_req.req.locked_cache = None
                 break
 
             if uses_swa_tail_prealloc:
@@ -944,6 +954,7 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
                 ):
                     if prefix_len > 0:
                         self.tree_cache.dec_lock_ref(decode_req.req.last_node)
+                    decode_req.req.locked_cache = None
                     break
 
             dst_kv_indices = self._pre_alloc(
@@ -970,13 +981,6 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
                 # SWA budget uses simple decrement (no radix cache eviction in
                 # the SWA pool, so page-rounding drift is negligible).
                 swa_allocatable_tokens -= swa_required
-            if decode_req.req.cache is None:
-                decode_req.req.cache = ReqCacheInfo(
-                    cache_protected_len=0,
-                    last_node=None,
-                    swa_uuid_for_lock=None,
-                    swa_prefix_lock_released=False,
-                )
             decode_req.req.cache_protected_len = total_prefix_len
 
             page_size = self.token_to_kv_pool_allocator.page_size
@@ -1917,7 +1921,7 @@ class SchedulerDisaggregationDecodeMixin:
                 # `pop_preallocated`. Retracted requests drop their cache state,
                 # so re-match only when that state is missing.
                 if self.server_args.disaggregation_decode_enable_radix_cache:
-                    tree_cache = self.tree_cache if req.cache is None else None
+                    tree_cache = self.tree_cache if req.locked_cache is None else None
                 else:
                     tree_cache = self.tree_cache
                 req.init_next_round_input(tree_cache)
