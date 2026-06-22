@@ -1056,13 +1056,6 @@ class HiMambaRadixCache(MambaRadixCache):
             1 if (last_host_node.mamba_evicted and last_host_node.mamba_backuped) else 0
         )
 
-        # COW source protection (HiCache): best_last_node can be a descendant of
-        # req.last_node, because host load-back reassigns req.last_node to an
-        # ancestor (mamba_host_hit), so the orchestrator prefix lock does not cover
-        # the source. Allocate the COW destination eagerly here with
-        # lock_node=best_last_node so the source mamba state cannot be evicted by a
-        # later alloc_for_extend evict before the deferred copy runs, then report
-        # the source via MatchResult so the orchestrator records it for that copy.
         mamba_cow_src = (
             best_last_node.mamba_value
             if (cow_mamba and best_last_node.mamba_value is not None)

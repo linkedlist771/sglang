@@ -433,8 +433,6 @@ class LMCRadixCache(RadixCache):
         """On request completion, insert device KV into radix and store to LMCache."""
 
         finish_result = super().cache_finished_req(params)
-        # LMCache storage side effects re-derive a topk-aware committed length
-        # and re-slice the row; that harvest stays on the residual Req (opid10).
         req = params.req
         rid = params.rid
         if not params.is_insert:

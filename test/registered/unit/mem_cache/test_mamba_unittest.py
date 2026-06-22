@@ -135,8 +135,6 @@ class TestMamba(unittest.TestCase):
         assert req_to_token_pool.available_size() == max_num_reqs
         assert req_to_token_pool.mamba_allocator.available_size() == mamba_cache_size
 
-        # alloc req without free mamba cache (free_mamba_cache already dropped
-        # req.mamba, so the next alloc creates a fresh ReqMambaInfo)
         req_to_token_pool.alloc([req])
         req_to_token_pool.free(req)
         assert req_to_token_pool.available_size() == max_num_reqs
@@ -310,9 +308,6 @@ class TestMamba(unittest.TestCase):
             )
         )
         kv_indices, last_node = result.device_indices, result.last_device_node
-        # COW match is a pure query: it reports the matched source index via
-        # MatchResult.mamba_cow_src and does not touch the Req. The destination
-        # alloc + copy happen later in the owned-KV alloc / forward phases.
         assert req9.mamba_cow_src_index is None
         assert result.mamba_cow_src is not None
         assert torch.equal(result.mamba_cow_src, last_node.mamba_value)

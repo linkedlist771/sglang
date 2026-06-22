@@ -690,8 +690,6 @@ class UnifiedRadixCacheSuite:
         return full_indices[:need_size]
 
     def _finish(self, tree, req, is_insert=True):
-        """Harvest finish params off a real Req and drive cache_finished_req
-        through the orchestrator helper (return-not-mutate frees included)."""
         harvest_and_finish_req(req, tree, is_insert=is_insert)
 
     def _insert(self, tree, allocator, req_to_token_pool, tokens, priority=0):
@@ -1227,9 +1225,6 @@ class UnifiedRadixCacheSuite:
             MatchPrefixParams(key=RadixKey(array("q", seq)), cow_mamba=True, req=req2)
         )
         self.assertEqual(len(m.device_indices), len(seq))
-        # COW match is a pure query: it reports the matched source index via
-        # MatchResult.mamba_cow_src and does not write the Req. The orchestrator
-        # records the COW and the copy is deferred to the forward stream.
         self.assertIsNone(req2.mamba_cow_src_index)
         src_value = m.last_device_node.component_data[ComponentType.MAMBA].value
         self.assertIsNotNone(m.mamba_cow_src)

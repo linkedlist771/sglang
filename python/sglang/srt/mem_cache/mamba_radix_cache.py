@@ -518,9 +518,6 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
 
     def cache_finished_req(self, params: CacheFinishParams) -> Optional[FinishResult]:
         """Cache request when it finishes."""
-        # Mamba finish reads mamba slot state off the Req and relocates it via
-        # free_mamba_cache; that harvest is opid9 scope, so it keeps reading the
-        # residual Req carried on the harvest params.
         req = params.req
         is_insert = params.is_insert
         kv_committed_len = params.kv_committed_len
@@ -631,9 +628,6 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
         self, params: CacheUnfinishParams
     ) -> Optional[UnfinishResult]:
         """Cache request when it is unfinished."""
-        # Mamba reads its slot state off the Req and donates/copies mamba slots;
-        # that harvest is opid9 scope, so it keeps reading the residual Req
-        # carried on the harvest params.
         req = params.req
 
         def _skip_cache_unfinished_req(
@@ -744,8 +738,6 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
         new_prefix_indices = torch.cat(
             [new_indices, kv_indices_orig[len(new_indices) :]]
         )
-        # mamba_last_track_seqlen is mamba slot bookkeeping (opid9 residue), so
-        # it stays a direct Req write via the residual params.req.
         req.mamba_last_track_seqlen = None
 
         return UnfinishResult(
@@ -1123,9 +1115,6 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
         else:
             mamba_branching_seqlen = None
 
-        # Defer COW to the owned-KV alloc phase: only report the source index so
-        # the orchestrator can allocate the destination once the matched node is
-        # protected by the standard prefix lock.
         mamba_cow_src = (
             last_node.mamba_value
             if (cow_mamba and last_node.mamba_value is not None)

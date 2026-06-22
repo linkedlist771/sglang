@@ -154,10 +154,6 @@ def maybe_cache_unfinished_req(req: Req, tree_cache: BasePrefixCache, **kwargs):
 def harvest_and_cache_unfinished_req(
     req: Req, tree_cache: BasePrefixCache, chunked: bool = False
 ) -> None:
-    # Harvest the values the cache needs off the Req so the cache no longer
-    # receives a Req. prev_prefix_len (= cache_protected_len) stays on the
-    # orchestrator side; the cache reports the refreshed prefix artifacts via
-    # UnfinishResult (return-not-mutate) and the orchestrator writes them back.
     token_ids = req.get_fill_ids()
     kv_indices = tree_cache.req_to_token_pool.req_to_token[
         req.req_pool_idx, : len(token_ids)
@@ -183,12 +179,6 @@ def harvest_and_cache_unfinished_req(
     )
     unfinish_result = tree_cache.cache_unfinished_req(unfinish_params)
 
-    # Return-not-mutate: the cache reports the refreshed prefix_indices, the new
-    # cache_protected_len and the post-handover lock state; the orchestrator
-    # writes them onto the Req. A None result means the cache fully handled the
-    # request and left the Req untouched (RadixCache disabled / first-turn
-    # streaming delegated to inner). lock_handover gates the lock-state writeback
-    # so skip / early-return paths leave last_node and the SWA lock fields alone.
     if unfinish_result is None:
         return
     if unfinish_result.prefix_indices is not None:
@@ -714,10 +704,6 @@ def alloc_for_decode(batch: ScheduleBatch, token_per_req: int) -> torch.Tensor:
 def harvest_and_finish_req(
     req: Req, tree_cache: BasePrefixCache, is_insert: bool = True
 ) -> None:
-    # Harvest the values the cache needs off the Req so the cache no longer
-    # receives a Req. owned.start (= cache_protected_len) is kept on the
-    # orchestrator side: it owns the duplicate / tail frees the cache returns
-    # (return-not-mutate), so the cache only sees a local view.
     kv_committed_len = req.effective_kv_committed_len()
     owned_start = req.cache.cache_protected_len if req.cache is not None else 0
     kv_indices = tree_cache.req_to_token_pool.req_to_token[
@@ -747,9 +733,6 @@ def harvest_and_finish_req(
     if req.cache is not None and tree_cache.supports_swa():
         req.cache.swa_prefix_lock_released = False
 
-    # Return-not-mutate: the cache reports the duplicate boundary (prefix_len)
-    # and effective key length (key_len) as offsets into the harvested
-    # kv_indices; the orchestrator owns the frees relative to owned.start.
     if finish_result is not None and req.kv is not None:
         if finish_result.prefix_len is not None:
             tree_cache.token_to_kv_pool_allocator.free(
