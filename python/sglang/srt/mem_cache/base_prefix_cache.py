@@ -49,7 +49,6 @@ class MatchPrefixParams:
     cow_mamba: bool = False
     req: Optional[Req] = None
 
-    # LMCache specific
     rid: Optional[str] = None
 
 
@@ -211,7 +210,6 @@ class InitLoadBackParams:
     mem_quota: Optional[int] = None
     req: Optional[Req] = None
 
-    # LMCache specific
     rid: Optional[str] = None
 
 
