@@ -242,7 +242,7 @@ def create_bench_cache(
     _rid = [0]
 
     def make_req():
-        from sglang.srt.managers.schedule_batch import Req, ReqCacheInfo
+        from sglang.srt.managers.schedule_batch import Req, ReqLockedCacheInfo
         from sglang.srt.sampling.sampling_params import SamplingParams
 
         req = Req(
@@ -253,9 +253,9 @@ def create_bench_cache(
         )
         _rid[0] += 1
         req_to_token_pool.alloc([req])
-        req.cache = ReqCacheInfo(
-            cache_protected_len=0,
-            last_node=None,
+        req.cache_protected_len = 0
+        req.last_node = None
+        req.locked_cache = ReqLockedCacheInfo(
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
         )
@@ -616,6 +616,8 @@ def bench_cache_finished(
 
     Simulates: match_prefix → inc_lock_ref → alloc → fill req_to_token → cache_finished_req.
     """
+    from sglang.srt.managers.schedule_batch import ReqLockedCacheInfo
+
     env = _make_env(num_seqs, chunk_len, kv_size, components, tree_cls, page_size)
 
     # Pre-build Req objects with token IDs filled into req_to_token
@@ -652,7 +654,10 @@ def bench_cache_finished(
         req.kv_committed_len = len(seq)
         req.kv_committed_freed = False
         if hasattr(lr, "swa_uuid_for_lock"):
-            req.swa_uuid_for_lock = lr.swa_uuid_for_lock
+            req.locked_cache = ReqLockedCacheInfo(
+                swa_uuid_for_lock=lr.swa_uuid_for_lock,
+                swa_prefix_lock_released=False,
+            )
         env.rtp.req_to_token[req.req_pool_idx, : len(kv_indices)] = kv_indices
         req_items.append(req)
 
