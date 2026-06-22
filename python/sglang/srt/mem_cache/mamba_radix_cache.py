@@ -728,7 +728,7 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
             new_indices[req.cache_protected_len :],
         )
 
-        self.dec_lock_ref(req.last_node)
+        self.dec_lock_ref(req.locked_cache.last_node)
         self.inc_lock_ref(new_last_node)
 
         # `req.prefix_indices` will be used in `PrefillAdder::add_chunked_req` later
@@ -739,6 +739,7 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
         req.cache_protected_len = len(new_indices)
         req.mamba_last_track_seqlen = None
         req.last_node = new_last_node
+        req.locked_cache.last_node = new_last_node
 
     def pretty_print(self) -> None:
         self._print_helper(self.root_node, 0)

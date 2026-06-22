@@ -678,7 +678,7 @@ def harvest_and_finish_req(
         swa_evicted_seqlen=req.kv.swa_evicted_seqlen if req.kv is not None else 0,
         priority=getattr(req, "priority", 0) or 0,
         is_insert=is_insert and not getattr(req, "skip_radix_cache_insert", False),
-        last_node=req.last_node if req.locked_cache is not None else None,
+        last_node=req.locked_cache.last_node if req.locked_cache is not None else None,
         swa_uuid_for_lock=(
             req.swa_uuid_for_lock if req.locked_cache is not None else None
         ),

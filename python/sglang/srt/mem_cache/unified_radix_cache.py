@@ -854,7 +854,7 @@ class UnifiedRadixCache(KVCacheEventMixin, BasePrefixCache):
         )
 
         self.dec_lock_ref(
-            req.last_node,
+            req.locked_cache.last_node,
             DecLockRefParams(swa_uuid_for_lock=req.swa_uuid_for_lock),
         )
         lock_result = self.inc_lock_ref(new_last_node)
@@ -868,6 +868,7 @@ class UnifiedRadixCache(KVCacheEventMixin, BasePrefixCache):
             req.prefix_indices = new_indices
         req.cache_protected_len = len(new_indices)
         req.last_node = new_last_node
+        req.locked_cache.last_node = new_last_node
         req.swa_uuid_for_lock = lock_result.swa_uuid_for_lock
 
         # cleanup
