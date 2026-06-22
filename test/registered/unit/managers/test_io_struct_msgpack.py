@@ -28,7 +28,6 @@ from sglang.srt.observability import trace as trace_module  # noqa: E402
 from sglang.srt.observability.req_time_stats import (  # noqa: E402
     APIServerReqTimeStats,
 )
-from sglang.srt.observability.trace import TraceReqContext  # noqa: E402
 from sglang.srt.sampling.sampling_params import SamplingParams  # noqa: E402
 
 register_cpu_ci(est_time=5, suite="base-a-test-cpu")
@@ -46,11 +45,7 @@ class UnsupportedNestedPayload(BaseReq, kw_only=True):
     value: Any
 
 
-class TraceContextPayload(BaseReq, kw_only=True):
-    req_context: TraceReqContext
-
-
-hook_custom_types(MsgpackPayload, UnsupportedNestedPayload, TraceContextPayload)
+hook_custom_types(MsgpackPayload, UnsupportedNestedPayload)
 
 
 class TestIoStructMsgpack(CustomTestCase):
@@ -131,14 +126,6 @@ class TestIoStructMsgpack(CustomTestCase):
 
         with self.assertRaisesRegex(TypeError, "PickleWrapper"):
             dec_hook(object, b"")
-
-    def test_nested_trace_req_context_round_trip(self):
-        payload = TraceContextPayload(req_context=TraceReqContext("rid-trace"))
-
-        rebuilt = msgpack_decode(msgpack_encode(payload))
-
-        self.assertIsInstance(rebuilt.req_context, TraceReqContext)
-        self.assertFalse(rebuilt.req_context.tracing_enable)
 
     def test_explicit_pickle_wrapper_round_trip(self):
         value = {"nested": {1, 2, 3}}

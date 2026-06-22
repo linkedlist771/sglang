@@ -55,7 +55,6 @@ from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.embed_types import PositionalEmbeds
 from sglang.srt.managers.schedule_batch import Modality
 from sglang.srt.multimodal.mm_utils import has_valid_data
-from sglang.srt.observability.trace import TraceReqContext
 from sglang.srt.sampling.sampling_params import SamplingParams
 from sglang.srt.utils import ImageData, VideoData
 from sglang.srt.utils.field_validators import validate_optional_list_i64_1d_2d
@@ -2234,8 +2233,6 @@ def enc_hook(obj: Any) -> Any:
         return (obj.shape, obj.dtype.str, raw_data)
     elif isinstance(obj, np.floating):
         return float(obj)
-    elif isinstance(obj, TraceReqContext):
-        return obj.__getstate__()
     else:
         raise TypeError(
             f"Cannot msgpack encode object of type {type(obj)} with enc_hook. "
@@ -2260,10 +2257,6 @@ def dec_hook(tp: Type, obj: Any) -> Any:
     elif tp is np.ndarray:
         shape, dtype, data = obj
         return np.frombuffer(data, dtype=np.dtype(dtype)).copy().reshape(shape)
-    elif tp is TraceReqContext:
-        ctx = TraceReqContext.__new__(TraceReqContext)
-        ctx.__setstate__(obj)
-        return ctx
     else:
         raise TypeError(
             f"Cannot msgpack decode object of type {type(obj)} as {tp} with "
