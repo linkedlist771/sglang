@@ -25,8 +25,8 @@ from sglang.srt.utils.common import ceil_align
 if TYPE_CHECKING:
     from sglang.srt.managers.schedule_batch import (
         Req,
-        ReqCacheInfo,
         ReqKvInfo,
+        ReqLockedCacheInfo,
         ReqMambaInfo,
     )
 
@@ -54,7 +54,9 @@ class SessionSlot:
     req_pool_idx: Optional[int] = None
     kv_committed_len: int = 0
 
-    cache: Optional[ReqCacheInfo] = None
+    last_node: Any = None
+    locked_cache: Optional[ReqLockedCacheInfo] = None
+    cache_protected_len: int = 0
     kv: Optional[ReqKvInfo] = None
     mamba: Optional[ReqMambaInfo] = None
 
@@ -70,8 +72,10 @@ class SessionSlot:
         self.kv = copy.copy(req.kv)
 
         if is_first:
-            self.cache = copy.copy(req.cache)
-            req.cache = None
+            self.last_node = req.last_node
+            self.locked_cache = copy.copy(req.locked_cache)
+            self.cache_protected_len = req.cache_protected_len
+            req.locked_cache = None
 
         if req.mamba is not None:
             self.mamba = copy.copy(req.mamba)
@@ -84,10 +88,15 @@ class SessionSlot:
 
     def restore_to_req(self, req: Req):
         """Restore KV state from this slot into an incoming request."""
+        from sglang.srt.managers.schedule_batch import ReqLockedCacheInfo
+
         req.req_pool_idx = self.req_pool_idx
         req.kv_committed_len = self.kv_committed_len
         req.kv = copy.copy(self.kv)
-        req.swa_uuid_for_lock = self.cache.swa_uuid_for_lock
+        req.locked_cache = ReqLockedCacheInfo(
+            swa_uuid_for_lock=self.locked_cache.swa_uuid_for_lock,
+            swa_prefix_lock_released=False,
+        )
         req.mamba = (
             copy.copy(self.mamba)
             if self.mamba is not None and self.mamba.mamba_pool_idx is not None
@@ -231,9 +240,9 @@ class StreamingSession(BasePrefixCache):
 
         # Streaming sessions are append-only (session_controller rollback
         # ensures req_nodes always points to the last successful req).
-        assert prefix_len >= slot.cache.cache_protected_len, (
+        assert prefix_len >= slot.cache_protected_len, (
             f"streaming session prefix shrank: {prefix_len=} < "
-            f"{slot.cache.cache_protected_len=}"
+            f"{slot.cache_protected_len=}"
         )
 
         # Free orphaned tail: alloc_for_extend will overwrite
@@ -252,7 +261,7 @@ class StreamingSession(BasePrefixCache):
             last_device_node=slot.virtual_node,
             last_host_node=slot.virtual_node,
             best_match_node=slot.virtual_node,
-            cache_protected_len=slot.cache.cache_protected_len,
+            cache_protected_len=slot.cache_protected_len,
         )
 
     def try_cache_finished_req(
@@ -279,7 +288,9 @@ class StreamingSession(BasePrefixCache):
                 slot = SessionSlot(
                     req_pool_idx=req.req_pool_idx,
                     kv=copy.copy(req.kv),
-                    cache=copy.copy(req.cache),
+                    last_node=req.last_node,
+                    locked_cache=copy.copy(req.locked_cache),
+                    cache_protected_len=req.cache_protected_len,
                     mamba=copy.copy(req.mamba) if req.mamba is not None else None,
                 )
                 self.slots[session_id] = slot
@@ -290,7 +301,7 @@ class StreamingSession(BasePrefixCache):
             self.release_session(session_id)
             req.req_pool_idx = None
             req.kv = None
-            req.cache = None
+            req.locked_cache = None
             req.session.abort_req()
             return True
 
@@ -385,12 +396,11 @@ class StreamingSession(BasePrefixCache):
         slot = self.slots.pop(session_id, None)
         if slot is None:
             return
-        if slot.cache is not None:
-            protected_len = slot.cache.cache_protected_len
-            lock_node = slot.cache.last_node
-            swa_uuid_for_lock = slot.cache.swa_uuid_for_lock
+        protected_len = slot.cache_protected_len
+        if slot.locked_cache is not None:
+            lock_node = slot.last_node
+            swa_uuid_for_lock = slot.locked_cache.swa_uuid_for_lock
         else:
-            protected_len = 0
             lock_node = None
             swa_uuid_for_lock = None
         tokens_freed = (
@@ -437,7 +447,7 @@ class StreamingSession(BasePrefixCache):
             )
             if slot.is_holding_kv and not in_batch:
                 allocated = ceil_align(slot.kv.kv_allocated_len, self.page_size)
-                total += allocated - slot.cache.cache_protected_len
+                total += allocated - slot.cache_protected_len
         return total
 
     def session_held_full_tokens(self, active_pool_idxs: Optional[set] = None) -> int:
@@ -454,7 +464,7 @@ class StreamingSession(BasePrefixCache):
             if slot.is_holding_kv and not in_batch:
                 allocated = ceil_align(slot.kv.kv_allocated_len, self.page_size)
                 total += allocated - max(
-                    slot.cache.cache_protected_len, slot.kv.swa_evicted_seqlen
+                    slot.cache_protected_len, slot.kv.swa_evicted_seqlen
                 )
         return total
 
