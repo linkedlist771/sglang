@@ -634,7 +634,7 @@ def harvest_and_finish_req(
     req: Req, tree_cache: BasePrefixCache, is_insert: bool = True
 ) -> None:
     kv_committed_len = req.effective_kv_committed_len()
-    owned_start = req.cache.cache_protected_len if req.cache is not None else 0
+    owned_start = req.cache_protected_len
     kv_indices = tree_cache.req_to_token_pool.req_to_token[
         req.req_pool_idx, :kv_committed_len
     ]
@@ -648,19 +648,18 @@ def harvest_and_finish_req(
         swa_evicted_seqlen=req.kv.swa_evicted_seqlen if req.kv is not None else 0,
         priority=getattr(req, "priority", 0) or 0,
         is_insert=is_insert and not getattr(req, "skip_radix_cache_insert", False),
-        last_node=req.cache.last_node if req.cache is not None else None,
+        last_node=req.last_node if req.locked_cache is not None else None,
         swa_uuid_for_lock=(
-            req.cache.swa_uuid_for_lock if req.cache is not None else None
+            req.swa_uuid_for_lock if req.locked_cache is not None else None
         ),
         swa_prefix_lock_released=(
-            req.cache.swa_prefix_lock_released if req.cache is not None else False
+            req.swa_prefix_lock_released if req.locked_cache is not None else False
         ),
         rid=req.rid,
         req=req,
     )
     finish_result = tree_cache.cache_finished_req(finish_params)
-    if req.cache is not None and tree_cache.supports_swa():
-        req.cache.swa_prefix_lock_released = False
+    req.locked_cache = None
 
     if finish_result is not None and req.kv is not None:
         if finish_result.prefix_len is not None:
