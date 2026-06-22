@@ -43,7 +43,7 @@ def evict_swa_out_of_window_for_unfinished(
         req_to_token_pool=tree_cache.req_to_token_pool,
         token_to_kv_pool_allocator=tree_cache.token_to_kv_pool_allocator,
     )
-    return req.swa_evicted_seqlen
+    return req.kv.swa_evicted_seqlen
 
 
 def maybe_cache_unfinished_req(req: Req, tree_cache: BasePrefixCache, **kwargs):
@@ -74,10 +74,10 @@ def harvest_and_cache_unfinished_req(
         chunked=chunked,
         last_node=req.locked_cache.last_node if req.locked_cache is not None else None,
         swa_uuid_for_lock=(
-            req.swa_uuid_for_lock if req.locked_cache is not None else None
+            req.locked_cache.swa_uuid_for_lock if req.locked_cache is not None else None
         ),
         swa_prefix_lock_released=(
-            req.swa_prefix_lock_released if req.locked_cache is not None else False
+            req.locked_cache.swa_prefix_lock_released if req.locked_cache is not None else False
         ),
         req=req,
     )
@@ -92,9 +92,9 @@ def harvest_and_cache_unfinished_req(
     if unfinish_result.lock_handover and req.locked_cache is not None:
         req.last_node = unfinish_result.last_node
         req.locked_cache.last_node = unfinish_result.last_node
-        req.swa_uuid_for_lock = unfinish_result.swa_uuid_for_lock
+        req.locked_cache.swa_uuid_for_lock = unfinish_result.swa_uuid_for_lock
         if unfinish_result.swa_prefix_lock_released is not None:
-            req.swa_prefix_lock_released = unfinish_result.swa_prefix_lock_released
+            req.locked_cache.swa_prefix_lock_released = unfinish_result.swa_prefix_lock_released
 
 
 def harvest_and_finish_req(
@@ -117,10 +117,12 @@ def harvest_and_finish_req(
         is_insert=is_insert and not getattr(req, "skip_radix_cache_insert", False),
         last_node=req.locked_cache.last_node if req.locked_cache is not None else None,
         swa_uuid_for_lock=(
-            req.swa_uuid_for_lock if req.locked_cache is not None else None
+            req.locked_cache.swa_uuid_for_lock if req.locked_cache is not None else None
         ),
         swa_prefix_lock_released=(
-            req.swa_prefix_lock_released if req.locked_cache is not None else False
+            req.locked_cache.swa_prefix_lock_released
+            if req.locked_cache is not None
+            else False
         ),
         rid=req.rid,
         req=req,
@@ -148,7 +150,7 @@ def release_kv_cache(req: Req, tree_cache: BasePrefixCache, is_insert: bool = Tr
         # TODO (csy, hanming): clean up this early allocation logic
         if req.mamba is not None and req.mamba.mamba_pool_idx is not None:
             tree_cache.req_to_token_pool.mamba_allocator.free(
-                req.mamba_pool_idx.unsqueeze(-1)
+                req.mamba.mamba_pool_idx.unsqueeze(-1)
             )
             req.mamba = None
         return
@@ -162,7 +164,7 @@ def release_kv_cache(req: Req, tree_cache: BasePrefixCache, is_insert: bool = Tr
     if req.kv is None:
         return
 
-    start_p, end_p = kv_committed_len, req.kv_allocated_len
+    start_p, end_p = kv_committed_len, req.kv.kv_allocated_len
 
     global_server_args = get_global_server_args()
     page_size = global_server_args.page_size
@@ -173,7 +175,7 @@ def release_kv_cache(req: Req, tree_cache: BasePrefixCache, is_insert: bool = Tr
     if spec_algo is None and not global_server_args.strip_thinking_cache:
         assert (
             start_p == end_p
-        ), f"Unexpected overallocated KV cache, {req.kv_committed_len=}, {req.kv_allocated_len=}"
+        ), f"Unexpected overallocated KV cache, {req.kv_committed_len=}, {req.kv.kv_allocated_len=}"
 
     if page_size > 1:
         start_p = ceil_align(start_p, page_size)

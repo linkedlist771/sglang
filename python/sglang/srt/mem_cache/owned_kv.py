@@ -47,7 +47,7 @@ def free_swa_out_of_window_slots(
     assert (
         req.cache_protected_len % page_size == 0
     ), "cache_protected_len must be page aligned"
-    req.swa_evicted_seqlen = max(req.swa_evicted_seqlen, req.cache_protected_len)
+    req.kv.swa_evicted_seqlen = max(req.kv.swa_evicted_seqlen, req.cache_protected_len)
 
     # Subtract an extra page_size so the eviction frontier never reaches the
     # radix tree insert boundary (page_floor(seq_len)). This keeps at least one
@@ -60,22 +60,22 @@ def free_swa_out_of_window_slots(
     else:
         evict_threshold = pre_len - sliding_window_size - page_size
     new_swa_evicted_seqlen = max(
-        req.swa_evicted_seqlen,
+        req.kv.swa_evicted_seqlen,
         evict_threshold,
     )
 
     if page_size > 1:
         new_swa_evicted_seqlen = (new_swa_evicted_seqlen // page_size) * page_size
 
-    if new_swa_evicted_seqlen > req.swa_evicted_seqlen:
+    if new_swa_evicted_seqlen > req.kv.swa_evicted_seqlen:
         free_slots = req_to_token_pool.req_to_token[
-            req.req_pool_idx, req.swa_evicted_seqlen : new_swa_evicted_seqlen
+            req.req_pool_idx, req.kv.swa_evicted_seqlen : new_swa_evicted_seqlen
         ]
         token_to_kv_pool_allocator.free_swa(free_slots)
         maybe_evict_dsv4_state_on_swa(
             token_to_kv_pool_allocator, req_to_token_pool, req, new_swa_evicted_seqlen
         )
-        req.swa_evicted_seqlen = new_swa_evicted_seqlen
+        req.kv.swa_evicted_seqlen = new_swa_evicted_seqlen
 
 
 def alloc_token_slots(

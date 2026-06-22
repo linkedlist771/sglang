@@ -1,5 +1,6 @@
 import unittest
 from array import array
+from types import SimpleNamespace
 
 import torch
 
@@ -31,7 +32,14 @@ register_amd_ci(est_time=10, suite="stage-b-test-1-gpu-small-amd")
 class _DummyReq:
     def __init__(self):
         self._kv_committed_len = 0
-        self.swa_prefix_lock_released = False
+        self.cache_protected_len = 0
+        self.last_node = None
+        self.locked_cache = SimpleNamespace(
+            last_node=None,
+            swa_uuid_for_lock=None,
+            swa_prefix_lock_released=False,
+        )
+        self.kv = SimpleNamespace(swa_evicted_seqlen=0)
 
     def pop_committed_kv_cache(self):
         return self._kv_committed_len
@@ -52,11 +60,11 @@ def _finish(tree, req, is_insert=True):
             kv_committed_len=kv_committed_len,
             prev_prefix_len=req.cache_protected_len,
             prefix_indices_len=len(req.prefix_indices),
-            swa_evicted_seqlen=req.swa_evicted_seqlen,
+            swa_evicted_seqlen=req.kv.swa_evicted_seqlen,
             is_insert=is_insert,
             last_node=req.last_node,
-            swa_uuid_for_lock=req.swa_uuid_for_lock,
-            swa_prefix_lock_released=req.swa_prefix_lock_released,
+            swa_uuid_for_lock=req.locked_cache.swa_uuid_for_lock,
+            swa_prefix_lock_released=req.locked_cache.swa_prefix_lock_released,
             req=req,
         )
     )
@@ -647,8 +655,8 @@ class TestSWA(unittest.TestCase):
         )
         req.extra_key = None
         req.last_node = tree.root_node
-        req.swa_uuid_for_lock = None
-        req.swa_evicted_seqlen = 0
+        req.locked_cache.swa_uuid_for_lock = None
+        req.kv.swa_evicted_seqlen = 0
         req.cache_protected_len = 1
         # Intentionally mismatch to ensure code does not use len(prefix_indices).
         req.prefix_indices = torch.tensor([7, 8, 9, 10, 11], device=tree.device)
@@ -682,8 +690,8 @@ class TestSWA(unittest.TestCase):
         )
         req2.extra_key = None
         req2.last_node = tree.root_node
-        req2.swa_uuid_for_lock = None
-        req2.swa_evicted_seqlen = 0
+        req2.locked_cache.swa_uuid_for_lock = None
+        req2.kv.swa_evicted_seqlen = 0
         req2.cache_protected_len = 1
         req2.prefix_indices = torch.tensor([21, 22, 23, 24, 25], device=tree.device)
 
