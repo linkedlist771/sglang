@@ -42,6 +42,7 @@ def _make_req(
     req.mamba = None
     req.cache_protected_len = 0
     req.locked_cache = ReqLockedCacheInfo(
+        last_node=None,
         swa_uuid_for_lock=None,
         swa_prefix_lock_released=False,
     )
