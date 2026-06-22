@@ -633,10 +633,6 @@ def alloc_for_decode(batch: ScheduleBatch, token_per_req: int) -> torch.Tensor:
 def harvest_and_finish_req(
     req: Req, tree_cache: BasePrefixCache, is_insert: bool = True
 ) -> None:
-    # Harvest the values the cache needs off the Req so the cache no longer
-    # receives a Req. owned.start (= cache_protected_len) is kept on the
-    # orchestrator side: it owns the duplicate / tail frees the cache returns
-    # (return-not-mutate), so the cache only sees a local view.
     kv_committed_len = req.effective_kv_committed_len()
     owned_start = req.cache.cache_protected_len if req.cache is not None else 0
     kv_indices = tree_cache.req_to_token_pool.req_to_token[
@@ -666,9 +662,6 @@ def harvest_and_finish_req(
     if req.cache is not None and tree_cache.supports_swa():
         req.cache.swa_prefix_lock_released = False
 
-    # Return-not-mutate: the cache reports the duplicate boundary (prefix_len)
-    # and effective key length (key_len) as offsets into the harvested
-    # kv_indices; the orchestrator owns the frees relative to owned.start.
     if finish_result is not None and req.kv is not None:
         if finish_result.prefix_len is not None:
             tree_cache.token_to_kv_pool_allocator.free(
