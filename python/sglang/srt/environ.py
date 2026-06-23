@@ -218,6 +218,9 @@ class Envs:
     SGLANG_LOG_SCHEDULER_STATUS_INTERVAL = EnvFloat(60.0)
     SGLANG_LOG_PICKLE_IPC_OBJECTS = EnvBool(False)
 
+    # IPC
+    SGLANG_USE_PICKLE_IPC = EnvBool(True)
+
     # SGLang CI
     SGLANG_IS_IN_CI = EnvBool(False)
     SGLANG_IS_IN_CI_AMD = EnvBool(False)

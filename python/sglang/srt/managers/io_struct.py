@@ -2294,6 +2294,7 @@ _pickle_transport_types: tuple[Type[msgspec.Struct], ...] = (
 
 _msgpack_encoder = msgspec.msgpack.Encoder(enc_hook=enc_hook)
 _msgpack_decoder = msgspec.msgpack.Decoder(Union[_all_types], dec_hook=dec_hook)
+_USE_PICKLE_IPC = envs.SGLANG_USE_PICKLE_IPC.get()
 
 
 # technically all the msgpack struct type should be define in this file
@@ -2344,10 +2345,17 @@ def msgpack_decode(data: bytes) -> Any:
 
 
 def sock_send(socket: Socket, obj: Any, flags=0):
+    if _USE_PICKLE_IPC:
+        socket.send_pyobj(obj, flags=flags, protocol=pickle.HIGHEST_PROTOCOL)
+        return
+
     socket.send(msgpack_encode(obj), flags=flags)
 
 
 def sock_recv(socket: Socket, flags=0) -> Any:
+    if _USE_PICKLE_IPC:
+        return socket.recv_pyobj(flags=flags)
+
     data = socket.recv(flags=flags)
     if isinstance(data, bytes):
         return msgpack_decode(data)
@@ -2358,10 +2366,17 @@ def sock_recv(socket: Socket, flags=0) -> Any:
 
 
 async def async_sock_send(socket: AsyncSocket, obj: Any, flags=0):
+    if _USE_PICKLE_IPC:
+        await socket.send_pyobj(obj, flags=flags, protocol=pickle.HIGHEST_PROTOCOL)
+        return
+
     await socket.send(msgpack_encode(obj), flags=flags)
 
 
 async def async_sock_recv(socket: AsyncSocket, flags=0) -> Any:
+    if _USE_PICKLE_IPC:
+        return await socket.recv_pyobj(flags=flags)
+
     data = await socket.recv(flags=flags)
     if isinstance(data, bytes):
         return msgpack_decode(data)
