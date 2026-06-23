@@ -1314,6 +1314,66 @@ class CudaGraphRunner:
         if self.model_runner.hisparse_coordinator is not None:
             self.model_runner.hisparse_coordinator.num_real_reqs.fill_(raw_bs)
 
+    def _dump_replay_inputs(self, dump_dir, forward_batch, graph_key):
+        """DEBUG: snapshot the static replay inputs BEFORE the graph is launched.
+
+        Enable with env `SGLANG_DUMP_REPLAY=/path/to/dir`. The dump runs OUTSIDE
+        the captured region, so torch.cuda.synchronize() / .cpu() are safe here.
+        The highest-numbered file per rank == the input of the step that crashed
+        (because the dump happens before .replay(), which is where IMA fires).
+        """
+        import os
+
+        os.makedirs(dump_dir, exist_ok=True)
+        rank = getattr(self.model_runner, "tp_rank", 0)
+        step = getattr(self, "_dump_step", 0)
+        self._dump_step = step + 1
+        torch.cuda.synchronize()  # safe: outside capture; flush pending copies
+
+        b = self.buffers
+        bs, raw_bs, num_token = self.bs, self.raw_bs, self.raw_num_token
+        snapshot, ptrs, ranges = {}, {}, {}
+
+        def _grab(prefix, name, t, live=None):
+            if not isinstance(t, torch.Tensor):
+                return
+            snapshot[f"{prefix}.{name}"] = t.detach().to("cpu", copy=True)
+            ptrs[f"{prefix}.{name}"] = (hex(t.data_ptr()), tuple(t.shape), str(t.dtype))
+            sl = t if live is None else t[:live]
+            if sl.numel() and sl.dtype in (torch.int32, torch.int64):
+                ranges[f"{prefix}.{name}"] = (int(sl.min()), int(sl.max()))
+
+        # 1) DecodeInputBuffers static inputs (full buffer kept, incl. padded rows).
+        for name, live in [
+            ("input_ids", num_token), ("positions", num_token),
+            ("seq_lens", bs), ("req_pool_indices", bs),
+            ("out_cache_loc", num_token), ("num_token_non_padded", None),
+            ("global_num_tokens_gpu", None), ("seq_lens_cpu", bs),
+        ]:
+            _grab("buf", name, getattr(b, name, None), live)
+
+        # 2) Attention-backend graph metadata buffers (most likely to point off
+        #    the KV cache on replay). Use __dict__ to avoid triggering properties.
+        for name, t in vars(self.attn_backend).items():
+            if isinstance(t, torch.Tensor) and any(
+                k in name for k in ("kv_ind", "indptr", "num_kv_splits", "cuda_graph")
+            ):
+                _grab("attn", name, t)
+
+        snapshot["__meta__"] = {
+            "rank": rank, "step": step, "graph_key": str(graph_key),
+            "raw_bs": raw_bs, "bs": bs, "raw_num_token": num_token,
+            "ptrs": ptrs, "int_ranges": ranges,
+        }
+        path = os.path.join(dump_dir, f"replay_rank{rank}_step{step:06d}.pt")
+        torch.save(snapshot, path)
+        print(
+            f"[dump] {path} graph_key={graph_key} bs={bs} raw_bs={raw_bs}\n"
+            f"       int_ranges(min,max)={ranges}\n"
+            f"       ptrs={ptrs}",
+            flush=True,
+        )
+
     def replay(
         self,
         forward_batch: ForwardBatch,
@@ -1341,6 +1401,14 @@ class CudaGraphRunner:
         variant_label = self._resolve_lora_variant(forward_batch)
         stream_idx = get_current_stream_idx() if self.enable_pdmux else None
         graph_key = self._make_graph_key(self.bs, stream_idx, variant_label)
+
+        # DEBUG: dump replay inputs before launching the graph (env-gated, no-op
+        # unless SGLANG_DUMP_REPLAY is set). Must be BEFORE .replay(): an illegal
+        # memory access there corrupts the CUDA context, so post-mortem dumps fail.
+        _dump_dir = os.environ.get("SGLANG_DUMP_REPLAY")
+        if _dump_dir:
+            self._dump_replay_inputs(_dump_dir, forward_batch, graph_key)
+
         ctx = (
             self.model_runner.device_timer.wrap(
                 metadata={

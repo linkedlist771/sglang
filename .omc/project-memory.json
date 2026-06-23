@@ -1,0 +1,283 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1781698694919,
+  "projectRoot": "/Users/dingli/Desktop/GitHubProjects/sglang",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "assets",
+      "docs",
+      "examples",
+      "scripts",
+      "test"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "3rdparty": {
+      "path": "3rdparty",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1781698694909,
+      "keyFiles": []
+    },
+    "assets": {
+      "path": "assets",
+      "purpose": "Static assets",
+      "fileCount": 4,
+      "lastAccessed": 1781698694909,
+      "keyFiles": [
+        "logo.png",
+        "logo.svg",
+        "logo_square.png",
+        "logo_square.svg"
+      ]
+    },
+    "benchmark": {
+      "path": "benchmark",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1781698694909,
+      "keyFiles": [
+        "bench_adaptive_speculative.py"
+      ]
+    },
+    "docker": {
+      "path": "docker",
+      "purpose": null,
+      "fileCount": 13,
+      "lastAccessed": 1781698694910,
+      "keyFiles": [
+        "Dockerfile",
+        "arm64.Dockerfile",
+        "compose.yaml",
+        "gateway.Dockerfile",
+        "k8s-sglang-distributed-sts.yaml"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 8,
+      "lastAccessed": 1781698694910,
+      "keyFiles": [
+        "Makefile",
+        "README.md",
+        "conf.py",
+        "deploy.py",
+        "index.rst"
+      ]
+    },
+    "docs_new": {
+      "path": "docs_new",
+      "purpose": null,
+      "fileCount": 11,
+      "lastAccessed": 1781698694910,
+      "keyFiles": [
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "LICENSE",
+        "README.md",
+        "custom.css"
+      ]
+    },
+    "examples": {
+      "path": "examples",
+      "purpose": "Example code",
+      "fileCount": 0,
+      "lastAccessed": 1781698694910,
+      "keyFiles": []
+    },
+    "gpt_paper": {
+      "path": "gpt_paper",
+      "purpose": null,
+      "fileCount": 10,
+      "lastAccessed": 1781698694910,
+      "keyFiles": [
+        "build1.log",
+        "build2.log",
+        "gpt.log",
+        "gpt.pdf",
+        "ic.log"
+      ]
+    },
+    "parallel_minimal": {
+      "path": "parallel_minimal",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1781698694910,
+      "keyFiles": []
+    },
+    "proto": {
+      "path": "proto",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1781698694910,
+      "keyFiles": []
+    },
+    "python": {
+      "path": "python",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1781698694910,
+      "keyFiles": [
+        "pyproject.toml",
+        "pyproject_cpu.toml",
+        "pyproject_npu.toml",
+        "pyproject_other.toml",
+        "pyproject_xpu.toml"
+      ]
+    },
+    "rust": {
+      "path": "rust",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1781698694910,
+      "keyFiles": []
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 10,
+      "lastAccessed": 1781698694911,
+      "keyFiles": [
+        "build_sgl_deep_gemm.sh",
+        "convert_otel_2_perfetto.py",
+        "export_deepseek_nextn.py",
+        "killall_sglang.sh",
+        "rename_sgl_deep_gemm_whl.sh"
+      ]
+    },
+    "sgl-kernel": {
+      "path": "sgl-kernel",
+      "purpose": null,
+      "fileCount": 18,
+      "lastAccessed": 1781698694911,
+      "keyFiles": [
+        "CMakeLists.txt",
+        "Dockerfile",
+        "LICENSE",
+        "Makefile",
+        "README.md"
+      ]
+    },
+    "sgl-model-gateway": {
+      "path": "sgl-model-gateway",
+      "purpose": null,
+      "fileCount": 7,
+      "lastAccessed": 1781698694911,
+      "keyFiles": [
+        "Cargo.toml",
+        "Makefile",
+        "README.md",
+        "build.rs",
+        "pytest.ini"
+      ]
+    },
+    "test": {
+      "path": "test",
+      "purpose": "Test files",
+      "fileCount": 4,
+      "lastAccessed": 1781698694911,
+      "keyFiles": [
+        "README.md",
+        "pytest.ini",
+        "run_suite.py"
+      ]
+    },
+    "docs_new/docs": {
+      "path": "docs_new/docs",
+      "purpose": "Documentation",
+      "fileCount": 1,
+      "lastAccessed": 1781698694911,
+      "keyFiles": [
+        "supported-models.mdx"
+      ]
+    },
+    "examples/assets": {
+      "path": "examples/assets",
+      "purpose": "Static assets",
+      "fileCount": 2,
+      "lastAccessed": 1781698694911,
+      "keyFiles": [
+        "example_image.png"
+      ]
+    },
+    "sgl-model-gateway/examples": {
+      "path": "sgl-model-gateway/examples",
+      "purpose": "Example code",
+      "fileCount": 0,
+      "lastAccessed": 1781698694912,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "python/sglang/srt/model_executor/cuda_graph_runner.py",
+      "accessCount": 14,
+      "lastAccessed": 1781166024100,
+      "type": "file"
+    },
+    {
+      "path": "python/sglang/srt/model_executor/forward_batch_info.py",
+      "accessCount": 3,
+      "lastAccessed": 1781166031415,
+      "type": "file"
+    },
+    {
+      "path": "python/sglang/srt/server_args.py",
+      "accessCount": 1,
+      "lastAccessed": 1780651386139,
+      "type": "file"
+    },
+    {
+      "path": "python/sglang/srt/layers/attention/triton_backend.py",
+      "accessCount": 1,
+      "lastAccessed": 1780652284720,
+      "type": "file"
+    },
+    {
+      "path": "test/srt/cuda_graph_replay_repro.py",
+      "accessCount": 1,
+      "lastAccessed": 1780652954146,
+      "type": "file"
+    },
+    {
+      "path": "python/sglang/srt/layers/moe/mega_moe.py",
+      "accessCount": 1,
+      "lastAccessed": 1781164558299,
+      "type": "file"
+    },
+    {
+      "path": "python/sglang/jit_kernel/deepseek_v4.py",
+      "accessCount": 1,
+      "lastAccessed": 1781164578915,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}
