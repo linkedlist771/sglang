@@ -875,31 +875,14 @@ class DeepseekSparseAttnBackend(
         if (
             topk_indices is None
             or self.dsa_index_kpool <= 1
-            or dsa_impl in ("fa3", "tilelang", "trtllm")
+            or dsa_impl in ("fa3", "flashmla_sparse", "tilelang", "trtllm")
         ):
             return
         raise NotImplementedError(
             "index_kpool > 1 appends tail tokens to topk_indices and is "
-            f"currently only supported by the FA3/TileLang/TRTLLM DSA {phase} "
+            f"currently only supported by the FA3/FlashMLA/TileLang/TRTLLM DSA {phase} "
             "backend."
         )
-
-    def _resolve_kpool_tail_backend(
-        self,
-        topk_indices: Optional[torch.Tensor],
-        dsa_impl: _DSA_IMPL_T,
-    ) -> _DSA_IMPL_T:
-        if (
-            topk_indices is None
-            or self.dsa_index_kpool <= 1
-            or dsa_impl != "flashmla_sparse"
-        ):
-            return dsa_impl
-        if self.device_sm_major >= 10:
-            return "trtllm"
-        if self.device_sm_major == 9:
-            return "fa3"
-        return dsa_impl
 
     def _pad_trtllm_sparse_page_table(
         self, page_table_1: torch.Tensor
@@ -3076,7 +3059,6 @@ class DeepseekSparseAttnBackend(
             )
             else "prefill"
         )
-        dsa_impl = self._resolve_kpool_tail_backend(topk_indices, dsa_impl)
         self._check_kpool_tail_backend(topk_indices, dsa_impl, phase)
 
         if dsa_impl == "trtllm" and not self.use_mha:
@@ -3405,7 +3387,7 @@ class DeepseekSparseAttnBackend(
         metadata = self.forward_metadata
         assert causal, "DSA is causal only"
 
-        dsa_impl = self._resolve_kpool_tail_backend(topk_indices, self.dsa_decode_impl)
+        dsa_impl = self.dsa_decode_impl
         self._check_kpool_tail_backend(topk_indices, dsa_impl, "decode")
 
         if dsa_impl == "trtllm":
@@ -3642,14 +3624,26 @@ class DeepseekSparseAttnBackend(
         else:
             q_input = q_all
 
+        # KPool appends up to index_kpool - 1 columns to index_topk. FlashMLA's
+        # SM90 sparse-prefill kernel requires the physical topk width to be a
+        # multiple of 128; topk_length below preserves each row's valid prefix.
+        if self.dsa_index_kpool > 1:
+            padding = (-page_table_1.shape[-1]) % 128
+            if padding:
+                page_table_1 = torch.cat(
+                    (
+                        page_table_1,
+                        page_table_1.new_full((*page_table_1.shape[:-1], padding), -1),
+                    ),
+                    dim=-1,
+                )
+
         # indices shape must be (s_q, h_kv=1, topk), keep h_kv=1 unchanged
         indices_input = page_table_1.unsqueeze(1)
 
-        # topk_length is the per-row count of valid indices
-        # (`dsa_cache_seqlens_int32` = seqlens clipped to `index_topk`). Rows
-        # whose context is shorter than `index_topk` have their indices
-        # tail-padded with -1; passing the valid length lets the kernel skip
-        # the padded tail instead of scanning the full topk width. The output
+        # topk_length is the per-row count of selected history plus any kpool
+        # tail. Remaining logical and alignment columns are padded with -1;
+        # passing the valid length lets the kernel skip that suffix. The output
         # is unchanged: the kernel masks -1 indices either way.
         if topk_length is not None and topk_length.shape[0] != num_tokens:
             # Metadata rows are expected to match q rows (the DP/CP padding
