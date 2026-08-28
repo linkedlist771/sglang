@@ -109,6 +109,9 @@ logger = logging.getLogger(__name__)
 _DSA_TRITON_PREFILL = get_bool_env_var("SGLANG_DSA_TRITON_PREFILL")
 _IS_GFX95 = is_gfx95_supported()
 
+_FLASHMLA_SPARSE_TOPK_ALIGNMENT = 128
+_FLASHMLA_KV_TOPK_ALIGNMENT = 64
+
 if is_cuda():
     import deep_gemm
 
@@ -215,6 +218,28 @@ def _is_kpool_metadata_fusion_supported(
         and page_size % index_kpool == 0
         and index_topk % index_kpool == 0
     )
+
+
+def _pad_flashmla_page_table(
+    page_table_1: torch.Tensor, *, alignment: int
+) -> torch.Tensor:
+    padding = (-page_table_1.shape[-1]) % alignment
+    if not padding:
+        return page_table_1
+    return torch.cat(
+        (
+            page_table_1,
+            page_table_1.new_full((*page_table_1.shape[:-1], padding), -1),
+        ),
+        dim=-1,
+    )
+
+
+def _flashmla_kv_physical_topk(index_topk: int, index_kpool: int) -> int:
+    if index_kpool <= 1:
+        return index_topk
+    logical_topk = index_topk + index_kpool - 1
+    return logical_topk + (-logical_topk) % _FLASHMLA_KV_TOPK_ALIGNMENT
 
 
 def _get_plan_topk_v2():
@@ -875,7 +900,8 @@ class DeepseekSparseAttnBackend(
         if (
             topk_indices is None
             or self.dsa_index_kpool <= 1
-            or dsa_impl in ("fa3", "flashmla_sparse", "tilelang", "trtllm")
+            or dsa_impl
+            in ("fa3", "flashmla_sparse", "flashmla_kv", "tilelang", "trtllm")
         ):
             return
         raise NotImplementedError(
@@ -3628,15 +3654,9 @@ class DeepseekSparseAttnBackend(
         # SM90 sparse-prefill kernel requires the physical topk width to be a
         # multiple of 128; topk_length below preserves each row's valid prefix.
         if self.dsa_index_kpool > 1:
-            padding = (-page_table_1.shape[-1]) % 128
-            if padding:
-                page_table_1 = torch.cat(
-                    (
-                        page_table_1,
-                        page_table_1.new_full((*page_table_1.shape[:-1], padding), -1),
-                    ),
-                    dim=-1,
-                )
+            page_table_1 = _pad_flashmla_page_table(
+                page_table_1, alignment=_FLASHMLA_SPARSE_TOPK_ALIGNMENT
+            )
 
         # indices shape must be (s_q, h_kv=1, topk), keep h_kv=1 unchanged
         indices_input = page_table_1.unsqueeze(1)
@@ -4041,10 +4061,21 @@ class DeepseekSparseAttnBackend(
             # inefficiently quantize the whole cache
             kv_cache = quantize_k_cache(kv_cache)
 
+        # KPool adds a live tail after index_topk. FlashMLA decode schedules
+        # sparse indices in blocks of 64, so pad the physical width with -1 and
+        # build scheduler metadata with that exact same width.
+        if self.dsa_index_kpool > 1:
+            page_table_1 = _pad_flashmla_page_table(
+                page_table_1, alignment=_FLASHMLA_KV_TOPK_ALIGNMENT
+            )
         indices = page_table_1.unsqueeze(1)
-        assert (
-            indices.shape[-1] == self.dsa_index_topk
-        )  # requirement of FlashMLA decode kernel
+        flashmla_topk = _flashmla_kv_physical_topk(
+            self.dsa_index_topk, self.dsa_index_kpool
+        )
+        assert indices.shape[-1] == flashmla_topk, (
+            f"FlashMLA decode indices width must match scheduler topk "
+            f"({flashmla_topk}), got {indices.shape[-1]}"
+        )
 
         o, _ = flash_mla_with_kvcache(
             q=q_input,
@@ -4674,7 +4705,7 @@ class DeepseekSparseAttnBackend(
             num_heads_k=1,
             num_heads_q=num_heads_q,
             is_fp8_kvcache=True,
-            topk=self.dsa_index_topk,
+            topk=_flashmla_kv_physical_topk(self.dsa_index_topk, self.dsa_index_kpool),
         )
 
         return DSAFlashMLAMetadata(
